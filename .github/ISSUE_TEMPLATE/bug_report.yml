@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in ActionDeck doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please don't include tokens, secret values or private repository names.
+        For security problems, use the repository's **Security** tab instead of a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the dashboard
+        2. Click ...
+        3. See error
+  - type: input
+    id: actiondeck-version
+    attributes:
+      label: ActionDeck version
+      description: Extensions view → ActionDeck → version number
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code version
+      description: Help → About
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where does VS Code run?
+      options:
+        - Local (macOS)
+        - Local (Windows)
+        - Local (Linux)
+        - Remote (SSH, WSL or Dev Container)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Remove anything private before pasting.

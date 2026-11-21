@@ -1,0 +1,748 @@
+{
+  "name": "actiondeck",
+  "displayName": "ActionDeck",
+  "description": "Mission control for GitHub Actions: dashboard, run inspection, logs, workflow dispatch, release plans and approvals — without leaving VS Code.",
+  "version": "0.1.0",
+  "publisher": "rtlabs",
+  "icon": "media/actiondeck-icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/blood-onix/ActionDeck.git"
+  },
+  "bugs": {
+    "url": "https://github.com/blood-onix/ActionDeck/issues"
+  },
+  "homepage": "https://github.com/blood-onix/ActionDeck#readme",
+  "pricing": "Free",
+  "files": [
+    "dist/extension.cjs",
+    "webview/dist/**",
+    "media/actiondeck-icon.png",
+    "media/01-stacked-deck-mono.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "galleryBanner": {
+    "color": "#12161c",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Visualization",
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "github actions",
+    "github",
+    "actions",
+    "workflows",
+    "ci",
+    "cd",
+    "ci/cd",
+    "pipeline",
+    "workflow dispatch",
+    "deployments",
+    "release",
+    "logs",
+    "copilot",
+    "devops"
+  ],
+  "activationEvents": [
+    "onCommand:actiondeck.openDashboard",
+    "onCommand:actiondeck.selectRepository",
+    "onCommand:actiondeck.openActionCenter",
+    "onCommand:actiondeck.openCompanion",
+    "onCommand:actiondeck.openLatestWorkflowRun",
+    "onCommand:actiondeck.openPipeline",
+    "onCommand:actiondeck.searchPipelines",
+    "onView:actiondeck.launcher",
+    "workspaceContains:.github/workflows/*.{yml,yaml}",
+    "onLanguage:yaml",
+    "onLanguage:github-actions-workflow"
+  ],
+  "main": "./dist/extension.cjs",
+  "contributes": {
+    "commands": [
+      {
+        "command": "actiondeck.openDashboard",
+        "title": "ActionDeck: Open Dashboard"
+      },
+      {
+        "command": "actiondeck.openActionCenter",
+        "title": "ActionDeck: Open Action Center"
+      },
+      {
+        "command": "actiondeck.selectRepository",
+        "title": "ActionDeck: Select Repository"
+      },
+      {
+        "command": "actiondeck.openCompanion",
+        "title": "ActionDeck: Open Workflow Companion",
+        "icon": "$(play)"
+      },
+      {
+        "command": "actiondeck.openLatestWorkflowRun",
+        "title": "ActionDeck: Open Latest Workflow Run",
+        "icon": "$(history)"
+      },
+      {
+        "command": "actiondeck.investigateRun",
+        "title": "ActionDeck: Explain Workflow Run Failure"
+      },
+      {
+        "command": "actiondeck.proposeWorkflowFix",
+        "title": "ActionDeck: Propose Workflow YAML Fix"
+      },
+      {
+        "command": "actiondeck.openPipeline",
+        "title": "ActionDeck: Open Pipeline Overview",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "actiondeck.openRepositoryDeck",
+        "title": "ActionDeck: Open Repository Deck",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "actiondeck.refreshWorkspaceTree",
+        "title": "ActionDeck: Refresh Workflows",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "actiondeck.openWorkflowFile",
+        "title": "Open Workflow File",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "actiondeck.searchPipelines",
+        "title": "ActionDeck: Search Pipelines",
+        "icon": "$(search)"
+      },
+      {
+        "command": "actiondeck.sortWorkspaceTree",
+        "title": "ActionDeck: Sort Workflows",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "actiondeck.pinWorkflow",
+        "title": "Pin Workflow",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "actiondeck.unpinWorkflow",
+        "title": "Unpin Workflow",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "actiondeck.moveRepositoryUp",
+        "title": "Move Repository Up",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "actiondeck.moveRepositoryDown",
+        "title": "Move Repository Down",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "actiondeck.selectAiModel",
+        "title": "ActionDeck: Select AI Model for Explanations"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "actiondeck_list_workflows",
+        "displayName": "ActionDeck: List Workflows",
+        "modelDescription": "List workflows and recent summary metadata for the explicitly selected ActionDeck repository.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "filter": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        },
+        "toolReferenceName": "actiondeck_list_workflows",
+        "canBeReferencedInPrompt": true
+      },
+      {
+        "name": "actiondeck_inspect_run",
+        "displayName": "ActionDeck: Inspect Run",
+        "modelDescription": "Inspect attempt-specific run, job, and step metadata for the selected repository.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "runId",
+            "attempt"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "toolReferenceName": "actiondeck_inspect_run",
+        "canBeReferencedInPrompt": true
+      },
+      {
+        "name": "actiondeck_get_log_excerpt",
+        "displayName": "ActionDeck: Get Log Excerpt",
+        "modelDescription": "Read a bounded, redacted plain-text log excerpt (at most 200 lines) for a specific job or step.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "workflowId",
+            "runId",
+            "attempt",
+            "jobId",
+            "ref"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "jobId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "stepNumber": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ref": {
+              "type": "string"
+            },
+            "maxLines": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        },
+        "toolReferenceName": "actiondeck_get_log_excerpt",
+        "canBeReferencedInPrompt": true
+      },
+      {
+        "name": "actiondeck_get_workflow_revision",
+        "displayName": "ActionDeck: Get Workflow Revision",
+        "modelDescription": "Retrieve workflow YAML source at an investigated commit revision or ref as untrusted evidence.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "workflowId"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ref": {
+              "type": "string"
+            },
+            "sha": {
+              "type": "string"
+            }
+          }
+        },
+        "toolReferenceName": "actiondeck_get_workflow_revision",
+        "canBeReferencedInPrompt": true
+      },
+      {
+        "name": "actiondeck_inspect_dispatch_inputs",
+        "displayName": "ActionDeck: Inspect Dispatch Inputs",
+        "modelDescription": "Read and validate remote workflow_dispatch input definitions on a ref without submitting.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "workflowId",
+            "ref"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ref": {
+              "type": "string"
+            },
+            "inputs": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      {
+        "name": "actiondeck_inspect_plan",
+        "displayName": "ActionDeck: Inspect Release Plan",
+        "modelDescription": "Inspect a persisted repository-bound release plan and why progression is blocked.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "planId"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "planId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "actiondeck_inspect_pending_actions",
+        "displayName": "ActionDeck: Inspect Pending Actions",
+        "modelDescription": "Summarize blocked release plans and pending approval items for the active repository.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "actiondeck_dispatch_workflow",
+        "displayName": "ActionDeck: Dispatch Workflow (Confirmed)",
+        "modelDescription": "Dispatch a remote workflow on a ref after explicit user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "workflowId",
+            "ref"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "workflowId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ref": {
+              "type": "string"
+            },
+            "inputs": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      {
+        "name": "actiondeck_run_action",
+        "displayName": "ActionDeck: Cancel or Rerun Workflow Run (Confirmed)",
+        "modelDescription": "Cancel an active run or rerun failed jobs after explicit user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "action",
+            "runId",
+            "attempt"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": [
+                "cancel",
+                "rerun_failed_jobs"
+              ]
+            },
+            "runId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      {
+        "name": "actiondeck_review_deployment",
+        "displayName": "ActionDeck: Review Pending Deployment (Confirmed)",
+        "modelDescription": "Approve or reject explicit pending deployment environments after user confirmation.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "runId",
+            "environmentIds",
+            "state"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "environmentIds": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "approved",
+                "rejected"
+              ]
+            },
+            "comment": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "actiondeck_start_plan",
+        "displayName": "ActionDeck: Start Release Plan (Confirmed)",
+        "modelDescription": "Confirm starting a persisted sequential release plan.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositoryId",
+            "planId"
+          ],
+          "properties": {
+            "repositoryId": {
+              "type": "string"
+            },
+            "planId": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "actiondeck.openCompanion",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "navigation"
+        },
+        {
+          "command": "actiondeck.openLatestWorkflowRun",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "actiondeck.openPipeline",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "actiondeck@1"
+        },
+        {
+          "command": "actiondeck.openLatestWorkflowRun",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "actiondeck@2"
+        },
+        {
+          "command": "actiondeck.openCompanion",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "actiondeck@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "actiondeck.openPipeline",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "actiondeck@1"
+        },
+        {
+          "command": "actiondeck.openLatestWorkflowRun",
+          "when": "resourcePath =~ /\\.github\\/workflows\\/[^/]+\\.ya?ml$/",
+          "group": "actiondeck@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "actiondeck.searchPipelines",
+          "when": "view == actiondeck.launcher",
+          "group": "navigation@1"
+        },
+        {
+          "command": "actiondeck.sortWorkspaceTree",
+          "when": "view == actiondeck.launcher",
+          "group": "navigation@2"
+        },
+        {
+          "command": "actiondeck.openActionCenter",
+          "when": "view == actiondeck.launcher",
+          "group": "navigation@3"
+        },
+        {
+          "command": "actiondeck.refreshWorkspaceTree",
+          "when": "view == actiondeck.launcher",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "actiondeck.openRepositoryDeck",
+          "when": "view == actiondeck.launcher && viewItem == actiondeck.repository",
+          "group": "inline"
+        },
+        {
+          "command": "actiondeck.moveRepositoryUp",
+          "when": "view == actiondeck.launcher && viewItem == actiondeck.repository",
+          "group": "2_order@1"
+        },
+        {
+          "command": "actiondeck.moveRepositoryDown",
+          "when": "view == actiondeck.launcher && viewItem == actiondeck.repository",
+          "group": "2_order@2"
+        },
+        {
+          "command": "actiondeck.pinWorkflow",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/ && !(viewItem =~ /\\.pinned$/)",
+          "group": "inline@0"
+        },
+        {
+          "command": "actiondeck.unpinWorkflow",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow.*\\.pinned$/",
+          "group": "inline@0"
+        },
+        {
+          "command": "actiondeck.openLatestWorkflowRun",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/",
+          "group": "inline@1"
+        },
+        {
+          "command": "actiondeck.openWorkflowFile",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/",
+          "group": "inline@2"
+        },
+        {
+          "command": "actiondeck.openPipeline",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "actiondeck.openLatestWorkflowRun",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "actiondeck.openCompanion",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "actiondeck.openWorkflowFile",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/",
+          "group": "1_open@4"
+        },
+        {
+          "command": "actiondeck.pinWorkflow",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow/ && !(viewItem =~ /\\.pinned$/)",
+          "group": "2_pin@1"
+        },
+        {
+          "command": "actiondeck.unpinWorkflow",
+          "when": "view == actiondeck.launcher && viewItem =~ /^actiondeck\\.workflow.*\\.pinned$/",
+          "group": "2_pin@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "actiondeck.openRepositoryDeck",
+          "when": "false"
+        },
+        {
+          "command": "actiondeck.openWorkflowFile",
+          "when": "false"
+        },
+        {
+          "command": "actiondeck.pinWorkflow",
+          "when": "false"
+        },
+        {
+          "command": "actiondeck.unpinWorkflow",
+          "when": "false"
+        },
+        {
+          "command": "actiondeck.moveRepositoryUp",
+          "when": "false"
+        },
+        {
+          "command": "actiondeck.moveRepositoryDown",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "actiondeck",
+          "title": "ActionDeck",
+          "icon": "media/01-stacked-deck-mono.svg"
+        }
+      ]
+    },
+    "views": {
+      "actiondeck": [
+        {
+          "id": "actiondeck.launcher",
+          "name": "Workflows"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "actiondeck.launcher",
+        "contents": "No GitHub repositories with workflows were found in this workspace.\n[Open Dashboard](command:actiondeck.openDashboard)\n[Open Action Center](command:actiondeck.openActionCenter)"
+      }
+    ],
+    "configuration": {
+      "title": "ActionDeck",
+      "properties": {
+        "actiondeck.workflowFolderPrefixes": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Filename prefixes used to group workflows when no @folder annotation exists."
+        },
+        "actiondeck.ai.model": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Language model used by **Explain failure** and **Explain blocked plan**. `auto` uses Copilot's Auto router when it is exposed to extensions, otherwise a fast model (Haiku / mini class). Set a model id or family (e.g. `claude-haiku-5.5`) to pin one, or run **ActionDeck: Select AI Model for Explanations** to pick from the models available to you. *Investigate with Copilot* always uses the model selected in Copilot Chat."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "npm run typecheck && node esbuild.mjs && vite build --config webview/vite.config.ts",
+    "vscode:prepublish": "npm run compile",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p webview/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "compile:integration": "tsc -p tests/integration/tsconfig.json",
+    "test:integration": "npm run compile && npm run compile:integration && vscode-test",
+    "package": "vsce package --no-dependencies",
+    "publish:vsce": "vsce publish --no-dependencies",
+    "publish:ovsx": "ovsx publish --no-dependencies"
+  },
+  "dependencies": {
+    "@octokit/plugin-retry": "^7.2.1",
+    "@octokit/plugin-throttling": "^11.0.2",
+    "@octokit/rest": "^21.1.1",
+    "@vscode/codicons": "^0.0.46-24",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "yaml": "^2.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.12",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@types/vscode": "^1.96.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.25.0",
+    "jsdom": "^31.0.1",
+    "ovsx": "^0.10.12",
+    "tailwindcss": "^4.0.12",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0",
+    "vitest": "^5.1.0"
+  },
+  "overrides": {
+    "mocha": "^12.0.3",
+    "glob": "^14.0.6",
+    "minimatch": "^11.0.8"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.3": true
+  }
+}

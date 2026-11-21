@@ -1,0 +1,59 @@
+name: Release
+
+# Publishes to the VS Code Marketplace and Open VSX when a version tag is pushed:
+#   npm version patch   (or minor / major)
+#   git push --follow-tags
+#
+# Required repository secrets:
+#   VSCE_PAT  - Azure DevOps personal access token with Marketplace > Manage scope
+#   OVSX_PAT  - Open VSX access token (open-vsx.org > Settings > Access Tokens).
+#               Optional: the Open VSX step is skipped while it is missing.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # needed to create the GitHub Release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check tag matches package.json version
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$PKG_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Package extension
+        run: npx vsce package --no-dependencies --out actiondeck-${GITHUB_REF_NAME}.vsix
+
+      - name: Publish to VS Code Marketplace
+        run: npx vsce publish --no-dependencies --packagePath actiondeck-${GITHUB_REF_NAME}.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX
+        # Skipped until the OVSX_PAT secret is added.
+        if: ${{ env.OVSX_PAT != '' }}
+        run: npx ovsx publish actiondeck-${GITHUB_REF_NAME}.vsix
+
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" actiondeck-${GITHUB_REF_NAME}.vsix --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

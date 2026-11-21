@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+dist-test/
+webview/dist/
+.vscode-test/
+coverage/
+*.log
+.env*
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+*.vsix

@@ -1,0 +1,112 @@
+{
+  "name": "ActionDeck",
+  "version": 1,
+  "color": {
+    "note": "Reference values are VS Code's Dark Modern, Light Modern and Dark High Contrast defaults. In the extension every UI token is bound to the --vscode-* variable named in its usage note, so the user's real theme always wins; brand-* tokens are fixed and never paint UI chrome.",
+    "themes": [
+      { "id": "dark", "name": "Dark Modern" },
+      { "id": "light", "name": "Light Modern" },
+      { "id": "hc", "name": "High Contrast" }
+    ],
+    "tokens": [
+      { "name": "surface", "value": { "dark": "#1f1f1f", "light": "#ffffff", "hc": "#000000" }, "usage": "Webview page and table background. Binds --vscode-editor-background." },
+      { "name": "surface-sunken", "value": { "dark": "#181818", "light": "#f8f8f8", "hc": "#000000" }, "usage": "Sticky table header, toolbar strip, log viewer gutter. Binds --vscode-sideBar-background." },
+      { "name": "surface-raised", "value": { "dark": "#202020", "light": "#f8f8f8", "hc": "#0c141f" }, "usage": "Drawers, cards, popovers. Binds --vscode-editorWidget-background." },
+      { "name": "surface-hover", "value": { "dark": "#2a2d2e", "light": "#f2f2f2", "hc": "#0c141f" }, "usage": "Row and ghost-button hover. Binds --vscode-list-hoverBackground." },
+      { "name": "input", "value": { "dark": "#313131", "light": "#ffffff", "hc": "#000000" }, "usage": "Text inputs, selects, search field. Binds --vscode-input-background." },
+      { "name": "selection", "value": { "dark": "#04395e", "light": "#e4e6f1", "hc": "#000000" }, "usage": "Selected table row, active job in the tree. Binds --vscode-list-activeSelectionBackground." },
+      { "name": "selection-outline", "value": { "dark": "#04395e", "light": "#e4e6f1", "hc": "#f38518" }, "usage": "1px outline on the selected row; carries selection in High Contrast where the fill is black. Binds --vscode-list-focusOutline." },
+      { "name": "border", "value": { "dark": "#2b2b2b", "light": "#e5e5e5", "hc": "#6fc3df" }, "usage": "Row dividers, drawer and card edges. Binds --vscode-panel-border." },
+      { "name": "border-strong", "value": { "dark": "#3c3c3c", "light": "#cecece", "hc": "#6fc3df" }, "usage": "Control borders: inputs, secondary buttons, chips. Binds --vscode-input-border." },
+      { "name": "ink", "value": { "dark": "#cccccc", "light": "#3b3b3b", "hc": "#ffffff" }, "usage": "All body text and status labels on surface, surface-sunken, surface-raised, selection. Binds --vscode-foreground." },
+      { "name": "ink-muted", "value": { "dark": "#9d9d9d", "light": "#717171", "hc": "#d6d6d6" }, "usage": "Meta text: paths, timestamps, sample windows, column headers, on surface and surface-sunken. Binds --vscode-descriptionForeground." },
+      { "name": "accent", "value": { "dark": "#0078d4", "light": "#005fb8", "hc": "#0f4a85" }, "usage": "Primary button fill (Trigger Workflow, Run Selected, Approve). One per region. Binds --vscode-button-background." },
+      { "name": "accent-hover", "value": { "dark": "#026ec1", "light": "#0258a8", "hc": "#0f4a85" }, "usage": "Primary button hover. Binds --vscode-button-hoverBackground." },
+      { "name": "on-accent", "value": { "dark": "#ffffff", "light": "#ffffff", "hc": "#ffffff" }, "usage": "Text and icons on accent. Binds --vscode-button-foreground." },
+      { "name": "link", "value": { "dark": "#4daafc", "light": "#005fb8", "hc": "#21a6ff" }, "usage": "Inline links: run #, commit SHA, Open on GitHub. Binds --vscode-textLink-foreground." },
+      { "name": "focus", "value": { "dark": "#0078d4", "light": "#005fb8", "hc": "#f38518" }, "usage": "The 1px :focus-visible ring on every control and row; 3:1+ on every surface. Binds --vscode-focusBorder." },
+      { "name": "success", "value": { "dark": "#73c991", "light": "#388a34", "hc": "#73c991" }, "usage": "Success icon only; the label beside it stays ink. Binds --vscode-testing-iconPassed." },
+      { "name": "failure", "value": { "dark": "#f85149", "light": "#e51400", "hc": "#f48771" }, "usage": "Failure icon, failed-step marker, log error lines. Binds --vscode-errorForeground." },
+      { "name": "warning", "value": { "dark": "#cca700", "light": "#bf8803", "hc": "#ffd370" }, "usage": "Waiting-for-approval and stale icons, preview banner icon. Icon only: light value is 3.1:1, below text contrast. Binds --vscode-editorWarning-foreground." },
+      { "name": "running", "value": { "dark": "#3794ff", "light": "#1a85ff", "hc": "#3794ff" }, "usage": "In-progress icon and the active step in plans and trackers. Binds --vscode-charts-blue." },
+      { "name": "restricted", "value": { "dark": "#b180d7", "light": "#652d90", "hc": "#b180d7" }, "usage": "Permission Restricted, SSO Required, Access Restricted icons. Binds --vscode-charts-purple." },
+      { "name": "uncertain", "value": { "dark": "#d18616", "light": "#a85b00", "hc": "#ffa657" }, "usage": "Outcome Uncertain, Missed Schedule icons and dashed outlines. Binds --vscode-charts-orange." },
+      { "name": "badge", "value": { "dark": "#616161", "light": "#cccccc", "hc": "#000000" }, "usage": "Count badges (folder counts, pending approvals). Binds --vscode-badge-background." },
+      { "name": "badge-ink", "value": { "dark": "#f8f8f8", "light": "#3b3b3b", "hc": "#ffffff" }, "usage": "Text on badge. Binds --vscode-badge-foreground." },
+      { "name": "warning-surface", "value": { "dark": "#352a05", "light": "#f6f5d2", "hc": "#000000" }, "usage": "Background of warning banners (local vs remote preview, stale data). Ink text on it. Binds --vscode-inputValidation-warningBackground." },
+      { "name": "error-surface", "value": { "dark": "#5a1d1d", "light": "#f2dede", "hc": "#000000" }, "usage": "Background of error banners and failed log lines. Ink text on it. Binds --vscode-inputValidation-errorBackground." },
+      { "name": "info-surface", "value": { "dark": "#063b49", "light": "#d6ecf2", "hc": "#000000" }, "usage": "Background of info banners (local scheduling notice). Ink text on it. Binds --vscode-inputValidation-infoBackground." },
+      { "name": "brand-amber", "value": "#f0a43a", "usage": "Identity only: logo, Marketplace banner, README hero. Never UI chrome, never a status." },
+      { "name": "brand-ink", "value": "#12161c", "usage": "Identity only: logo tile, Marketplace galleryBanner color (dark)." },
+      { "name": "brand-paper", "value": "#f6f1e7", "usage": "Identity only: light card in the mark, docs backgrounds." },
+      { "name": "brand-slate", "value": "#5b6b7f", "usage": "Identity only: secondary shapes in the mark." }
+    ]
+  },
+  "type": {
+    "fonts": [],
+    "families": {
+      "ui": "-apple-system, BlinkMacSystemFont, \"Segoe WPC\", \"Segoe UI\", system-ui, Ubuntu, \"Droid Sans\", sans-serif",
+      "mono": "\"SF Mono\", Menlo, Monaco, Consolas, \"Droid Sans Mono\", \"Courier New\", monospace"
+    },
+    "groups": [
+      {
+        "name": "Interface",
+        "family": "ui",
+        "styles": [
+          { "name": "display", "fontSize": "20px", "lineHeight": "26px", "fontWeight": 600, "sample": "ActionDeck", "usage": "Onboarding and empty-repo hero only. Never inside the dashboard." },
+          { "name": "title", "fontSize": "14px", "lineHeight": "20px", "fontWeight": 600, "sample": "deploy-production · Run #482", "usage": "Drawer and card titles." },
+          { "name": "section", "fontSize": "11px", "lineHeight": "16px", "fontWeight": 700, "letterSpacing": "0.04em", "sample": "JOBS", "usage": "Uppercase section headers, as VS Code side-bar sections. Use sparingly." },
+          { "name": "body", "fontSize": "13px", "lineHeight": "18px", "fontWeight": 400, "sample": "Run next only on success", "usage": "Default for rows, labels, form text. Binds --vscode-font-size." },
+          { "name": "body-strong", "fontSize": "13px", "lineHeight": "18px", "fontWeight": 600, "sample": "Build › Stage › Integration", "usage": "Workflow names, folder rows, emphasized values." },
+          { "name": "caption", "fontSize": "12px", "lineHeight": "16px", "fontWeight": 400, "sample": "85% pass · avg 3m 12s (last 20 completed runs)", "usage": "Meta lines under names, help text under fields." },
+          { "name": "label-xs", "fontSize": "11px", "lineHeight": "14px", "fontWeight": 600, "sample": "REMOTE-ONLY", "usage": "Availability chips and count badges." }
+        ]
+      },
+      {
+        "name": "Code",
+        "family": "mono",
+        "styles": [
+          { "name": "mono", "fontSize": "12px", "lineHeight": "18px", "fontWeight": 400, "sample": "##[error]Process completed with exit code 1.", "usage": "Log viewer lines, YAML snippets. Binds --vscode-editor-font-family." },
+          { "name": "mono-sm", "fontSize": "11px", "lineHeight": "16px", "fontWeight": 400, "sample": "main @ 8dc01b2", "usage": "Refs, SHAs, input keys, durations in dense columns." }
+        ]
+      }
+    ]
+  },
+  "spacing": {
+    "note": "A 2px base with VS Code's own steps. Rows and toolbars are dense by default.",
+    "tokens": [
+      { "name": "space-1", "value": "2px", "usage": "Icon-to-chip inset, badge vertical padding." },
+      { "name": "space-2", "value": "4px", "usage": "Icon-to-label gap, chip horizontal padding." },
+      { "name": "space-3", "value": "6px", "usage": "Button horizontal padding, gap between chips." },
+      { "name": "space-4", "value": "8px", "usage": "Cell padding, gap between toolbar controls." },
+      { "name": "space-5", "value": "12px", "usage": "Drawer and card inner padding." },
+      { "name": "space-6", "value": "16px", "usage": "Gap between form fields and between cards." },
+      { "name": "space-7", "value": "24px", "usage": "Empty-state padding, section breaks inside drawers." }
+    ]
+  },
+  "radius": {
+    "tokens": [
+      { "name": "radius-sm", "value": "2px", "usage": "Buttons, inputs, chips: VS Code's control radius." },
+      { "name": "radius-md", "value": "4px", "usage": "Cards, drawers, banners, log viewer." },
+      { "name": "radius-lg", "value": "6px", "usage": "Popovers and the dispatch tracker." },
+      { "name": "radius-pill", "value": "999px", "usage": "Count badges and the countdown pill only." }
+    ]
+  },
+  "size": {
+    "note": "Fixed layout dimensions. The narrow breakpoint is used in media queries as a literal 700px.",
+    "tokens": [
+      { "name": "row-h", "value": "24px", "usage": "Workflow table rows and job-tree rows (dense default)." },
+      { "name": "row-h-comfy", "value": "30px", "usage": "Rows when the user turns on actionDeck.density = comfortable." },
+      { "name": "control-h", "value": "24px", "usage": "Buttons, inputs, selects." },
+      { "name": "toolbar-h", "value": "36px", "usage": "Dashboard toolbar and drawer header strip." },
+      { "name": "icon", "value": "16px", "usage": "Every status and action icon." },
+      { "name": "drawer-min", "value": "360px", "usage": "Minimum width of the inspector or companion drawer before it stacks under the table." },
+      { "name": "bp-narrow", "value": "700px", "usage": "Below this panel width two-column grids collapse to one." }
+    ]
+  },
+  "shadow": {
+    "tokens": [
+      { "name": "shadow-widget", "value": { "dark": "0 0 8px 2px rgba(0,0,0,0.36)", "light": "0 0 8px 2px rgba(0,0,0,0.16)", "hc": "none" }, "usage": "Popovers and the floating batch bar only. Drawers use a border, not a shadow. Binds --vscode-widget-shadow." }
+    ]
+  }
+}
