@@ -727,7 +727,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^3.9.2",
+    "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.25.0",
     "jsdom": "^31.0.1",
     "ovsx": "^0.10.12",
