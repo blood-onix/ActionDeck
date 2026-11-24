@@ -44,6 +44,7 @@ interface DashboardData {
   approvalAudit?: ApprovalAuditView[];
   customGroups?: string[];
   columnLayout?: ColumnLayout;
+  runRefreshSeconds?: number;
 }
 
 interface WorkflowHistoryResult {
@@ -94,6 +95,8 @@ type DrawerPayload =
   | {
       readonly kind: "plan_editor";
       readonly workflowIds: readonly string[];
+      /** Set when editing a saved plan that has not started. */
+      readonly planId?: string;
     }
   | {
       readonly kind: "action_center";
@@ -962,17 +965,20 @@ export function Dashboard({ bridge }: { bridge: Bridge }) {
     }
 
     if (active.kind === "plan_editor") {
+      const editing = active.planId ? plans.find((plan) => plan.id === active.planId) : undefined;
       return (
         <Drawer
-          title={`New plan (${selectedWorkflows.length})`}
+          title={editing ? `Edit plan · ${editing.name}` : `New plan (${selectedWorkflows.length})`}
           widthPx={drawer.widthPx}
           dockedPosition={drawer.dockedPosition}
           onWidthChange={handleDrawerWidthChange}
           onClose={closeDrawer}
         >
           <ReleasePlanEditor
+            key={editing?.id ?? "new"}
             bridge={bridge}
             workflows={selectedWorkflows}
+            {...(editing ? { plan: editing, heading: "Edit Release Plan" } : {})}
             onSaved={(saved) => {
               upsertPlan(saved);
               closeDrawer();
@@ -1130,6 +1136,7 @@ export function Dashboard({ bridge }: { bridge: Bridge }) {
         <RunInspector
           bridge={bridge}
           runId={active.runId}
+          {...(data?.runRefreshSeconds !== undefined ? { defaultRefreshSeconds: data.runRefreshSeconds } : {})}
           {...(active.workflowId !== undefined ? { workflowId: active.workflowId } : {})}
           {...(active.refName ? { refName: active.refName } : {})}
           {...(active.autoAction ? { autoAction: active.autoAction } : {})}
@@ -1263,6 +1270,7 @@ export function Dashboard({ bridge }: { bridge: Bridge }) {
               onPlanUpdated={upsertPlan}
               onInspectRun={inspectRunById}
               onOpenWorkflow={openWorkflowByPath}
+              onEdit={(target) => openDrawer({ kind: "plan_editor", workflowIds: [], planId: target.id })}
               {...(plan.state === "completed"
                 ? { onDismiss: () => setFinishedPlanIds((current) => current.filter((id) => id !== plan.id)) }
                 : {})}

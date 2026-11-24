@@ -40,6 +40,7 @@ export class NotificationService {
         id: key,
         repositoryId,
         workflowId,
+        ...(run.workflowName ? { workflowName: run.workflowName } : {}),
         runId: run.id,
         attempt,
         title: run.displayTitle,

@@ -77,6 +77,10 @@
         "title": "ActionDeck: Open Action Center"
       },
       {
+        "command": "actiondeck.showGitHubAccess",
+        "title": "ActionDeck: Show GitHub Access"
+      },
+      {
         "command": "actiondeck.selectRepository",
         "title": "ActionDeck: Select Repository"
       },
@@ -678,6 +682,29 @@
     "configuration": {
       "title": "ActionDeck",
       "properties": {
+        "actiondeck.runRefreshInterval": {
+          "type": "number",
+          "enum": [
+            0,
+            5,
+            10,
+            15,
+            30,
+            45,
+            60
+          ],
+          "enumItemLabels": [
+            "Off",
+            "5 seconds",
+            "10 seconds",
+            "15 seconds",
+            "30 seconds",
+            "45 seconds",
+            "60 seconds"
+          ],
+          "default": 30,
+          "markdownDescription": "How often an open run refreshes its jobs and steps while it is queued, running or waiting for approval. Each refresh is one GitHub API request; nothing is requested while the panel is hidden or once the run has finished. You can also change it per run from the inspector's auto-refresh menu."
+        },
         "actiondeck.workflowFolderPrefixes": {
           "type": "array",
           "default": [],

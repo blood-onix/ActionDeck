@@ -25,7 +25,7 @@ vi.mock("vscode", () => ({
   commands: { executeCommand: mocks.executeCommand },
 }));
 
-import { chooseRepository } from "../../src/host/providers/workspace-repositories";
+import { chooseRepository, discoverWorkspaceRepositories } from "../../src/host/providers/workspace-repositories";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -46,6 +46,7 @@ describe("workspace repository selection", () => {
     const secondFolder = { uri: { toString: () => "file:///two" }, name: "two" };
     mocks.workspace.workspaceFolders = [firstFolder, secondFolder];
     mocks.getExtension.mockReturnValue({
+      isActive: true,
       exports: {
         getAPI: () => ({
           repositories: [
@@ -78,5 +79,44 @@ describe("workspace repository selection", () => {
       { label: "acme/one", description: "one · origin", choiceIndex: 0 },
       { label: "acme/two", description: "two · upstream", choiceIndex: 1 },
     ], expect.objectContaining({ canPickMany: false }));
+  });
+
+  it("activates the Git extension instead of reading exports it has not published yet", async () => {
+    const folder = { uri: { toString: () => "file:///one" }, name: "one" };
+    mocks.workspace.workspaceFolders = [folder];
+    const api = {
+      getAPI: () => ({
+        repositories: [{
+          rootUri: folder.uri,
+          state: { remotes: [{ name: "origin", fetchUrl: "https://github.com/acme/one.git", pushUrl: "" }] },
+        }],
+      }),
+    };
+    const extension = {
+      isActive: false,
+      // VS Code throws this when exports are read before activation.
+      get exports(): never {
+        throw new Error("Extension 'vscode.git' is not known or not activated");
+      },
+      activate: vi.fn(async () => api),
+    };
+    mocks.getExtension.mockReturnValue(extension);
+    mocks.showQuickPick.mockResolvedValue({ choiceIndex: 0 });
+
+    // The synchronous discovery waits for activation rather than throwing.
+    expect(discoverWorkspaceRepositories()).toEqual([]);
+    await expect(chooseRepository()).resolves.toMatchObject({ owner: "acme", repo: "one" });
+    expect(extension.activate).toHaveBeenCalledOnce();
+    expect(mocks.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("explains when the Git extension cannot be used", async () => {
+    mocks.workspace.workspaceFolders = [{ uri: { toString: () => "file:///one" }, name: "one" }];
+    mocks.getExtension.mockReturnValue({
+      isActive: true,
+      exports: { getAPI: () => { throw new Error("Git model not found"); } },
+    });
+    await expect(chooseRepository()).resolves.toBeUndefined();
+    expect(mocks.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("built-in Git extension"));
   });
 });

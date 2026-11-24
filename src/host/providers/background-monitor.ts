@@ -16,6 +16,7 @@ import { isOriginalActor, type NotificationService } from "../../application/run
 import type { ReleasePlanService } from "../../application/plans/plan-service";
 import { associateDispatchRun } from "../../application/dispatch/run-association";
 import type { ReleasePlanStep } from "../../domain/models/release-plan";
+import { ACTIVE_STEP_STATES, stageAt } from "../../domain/services/plan-transitions";
 import type { PlanStore } from "../../persistence/plan-store";
 import type { PlanStatusBarTicker } from "./plan-status";
 
@@ -27,7 +28,8 @@ export interface AutoApprovalAuditEntry {
   readonly environmentId: number;
   readonly environmentName: string;
   readonly ruleId: string;
-  readonly status: DeploymentReviewItemResult["status"];
+  /** `skipped` means the user opted in but GitHub reports this account cannot approve the gate. */
+  readonly status: DeploymentReviewItemResult["status"] | "skipped";
   readonly error?: string;
 }
 
@@ -39,6 +41,12 @@ export interface ApprovalPrompt {
   readonly branch: string;
   readonly environmentId: number;
   readonly environmentName: string;
+  /** False when GitHub reports the authenticated account cannot approve this gate. */
+  readonly canApprove: boolean;
+  readonly reason?: string;
+  readonly requiredReviewers?: readonly string[];
+  /** Set when the user opted into auto-approval for this run but it could not be applied. */
+  readonly autoApprovalBlocked?: boolean;
 }
 
 export interface BackgroundMonitorPorts {
@@ -51,6 +59,8 @@ export interface BackgroundMonitorPorts {
   readonly notifyApproval?: (prompt: ApprovalPrompt) => void | Promise<void>;
   readonly onRunsObserved?: (runs: readonly WorkflowRunRecord[]) => void;
   readonly onAutoApprovalAudit?: (entry: AutoApprovalAuditEntry) => void | Promise<void>;
+  /** Called once per gate GitHub reports the authenticated account cannot approve, for diagnostics. */
+  readonly onIneligibleGate?: (details: { runId: number; environmentName: string; reason?: string }) => void;
 }
 
 export interface BackgroundMonitorOptions {
@@ -84,6 +94,8 @@ export class BackgroundMonitor {
   private isInitialHydration = true;
   private readonly autoApprovedKeys = new Set<string>();
   private readonly succeededAutoApprovals = new Set<string>();
+  private readonly reportedIneligibleKeys = new Set<string>();
+  private readonly skippedAuditKeys = new Set<string>();
 
   constructor(private readonly options: BackgroundMonitorOptions) {
     this.token = options.token;
@@ -134,7 +146,7 @@ export class BackgroundMonitor {
       );
       for (const notification of notifications) {
         if (this.disposed || !this.lease.isActive()) return;
-        await this.options.ports?.notify?.(notification);
+        this.showToast(this.options.ports?.notify?.(notification));
       }
 
       this.options.ports?.onRunsObserved?.(runs);
@@ -164,6 +176,14 @@ export class BackgroundMonitor {
       }
       this.polling = false;
     }
+  }
+
+  /**
+   * Toasts are never awaited: VS Code keeps the promise pending until the user dismisses the toast, even
+   * after it slides into the notification center, which would stall polling and hold back later toasts.
+   */
+  private showToast(pending: void | Promise<void> | undefined): void {
+    void Promise.resolve(pending).catch(() => undefined);
   }
 
   dispose(): void {
@@ -226,36 +246,49 @@ export class BackgroundMonitor {
     for (const plan of plans) {
       if (this.disposed || !this.lease.isActive()) return;
       if (plan.state !== "running" && plan.state !== "waiting_approval") continue;
+      const stage = stageAt(plan.steps, plan.currentStepIndex);
+      if (!stage) continue;
 
-      const currentStep = plan.steps[plan.currentStepIndex];
-      if (!currentStep) continue;
-
-      const resolution = this.resolveStepRun(currentStep, runs);
-      if (!resolution) continue;
-      if ("uncertain" in resolution) {
-        await this.options.planService.markStepOutcomeUncertain(
-          this.options.context.id,
+      // Every dispatched step of the stage is followed: steps that start together finish in any order.
+      let observedAny = false;
+      for (const step of plan.steps.slice(stage.start, stage.end)) {
+        if (this.disposed || !this.lease.isActive()) return;
+        if (!ACTIVE_STEP_STATES.has(step.state)) continue;
+        const resolution = this.resolveStepRun(step, runs);
+        if (!resolution) continue;
+        observedAny = true;
+        if ("uncertain" in resolution) {
+          await this.options.planService.markStepOutcomeUncertain(
+            this.options.context.id,
+            plan.id,
+            resolution.uncertain,
+            step.id,
+          );
+          continue;
+        }
+        const matched = resolution.run;
+        await this.options.planService.advanceOnRunObserved(
+          dispatchRepo,
+          this.options.context,
           plan.id,
-          resolution.uncertain,
+          {
+            runId: matched.id,
+            status: matched.status,
+            conclusion: matched.conclusion,
+            waitingApproval: matched.status === "waiting",
+            htmlUrl: matched.htmlUrl,
+            stepId: step.id,
+          },
+          undefined,
+          signal,
         );
-        continue;
       }
-      const matched = resolution.run;
 
-      await this.options.planService.advanceOnRunObserved(
-        dispatchRepo,
-        this.options.context,
-        plan.id,
-        {
-          runId: matched.id,
-          status: matched.status,
-          conclusion: matched.conclusion,
-          waitingApproval: matched.status === "waiting",
-          htmlUrl: matched.htmlUrl,
-        },
-        undefined,
-        signal,
-      );
+      // A stage whose steps all finished before a reload moves on here, with nothing left to observe.
+      if (!observedAny) {
+        const latest = this.options.planStore.get(this.options.context.id, plan.id);
+        if (latest) await this.options.planService.settleStage(dispatchRepo, this.options.context, latest, undefined, signal);
+      }
     }
   }
 
@@ -306,12 +339,20 @@ export class BackgroundMonitor {
 
       const isOwnRun = this.isAuthenticatedUsersRun(run);
       const originalActorId = isOwnRun ? (this.options.context.authenticatedUserId ?? "") : "";
-      if (isOwnRun) await this.applyOneRunApproval(run, pendingEnvs, deploymentRepo, signal);
+      const blockedByEligibility = isOwnRun
+        ? await this.applyOneRunApproval(run, pendingEnvs, deploymentRepo, signal)
+        : new Set<number>();
       // A run with several pending environments always needs an explicit human selection.
       const allowAutoApproval = pendingEnvs.length === 1;
 
       for (const env of pendingEnvs) {
-        if (!env.eligible) continue;
+        if (!env.eligible) {
+          // A wait timer clears on its own; only a gate this account can never approve needs telling.
+          if (!env.currentUserCanApprove && isOwnRun) {
+            await this.reportIneligibleGate(run, env, blockedByEligibility.has(env.environmentId));
+          }
+          continue;
+        }
 
         const matchingRule = !allowAutoApproval ? undefined : this.options.autoApprovalService.findMatchingRule(this.options.context, {
           workflowId: run.workflowId ?? 0,
@@ -372,7 +413,7 @@ export class BackgroundMonitor {
           run,
           env.environmentId,
         )) {
-          await this.options.ports?.notifyApproval?.({
+          this.showToast(this.options.ports?.notifyApproval?.({
             repositoryId: this.options.context.id,
             runId: run.id,
             workflowId: run.workflowId ?? 0,
@@ -380,12 +421,53 @@ export class BackgroundMonitor {
             branch: run.branch,
             environmentId: env.environmentId,
             environmentName: env.environmentName,
-          });
+            canApprove: true,
+          }));
         }
       }
     }
 
     return actionableCount;
+  }
+
+  /**
+   * Tells the user their own run waits on a gate GitHub says they cannot approve, instead of dropping it
+   * silently. Not counted as actionable: nothing in ActionDeck can clear it.
+   */
+  private async reportIneligibleGate(
+    run: WorkflowRunRecord,
+    env: PendingEnvironment,
+    autoApprovalBlocked: boolean,
+  ): Promise<void> {
+    const key = `${run.id}:${env.environmentId}`;
+    if (!this.reportedIneligibleKeys.has(key)) {
+      this.reportedIneligibleKeys.add(key);
+      this.options.ports?.onIneligibleGate?.({
+        runId: run.id,
+        environmentName: env.environmentName,
+        ...(env.reason ? { reason: env.reason } : {}),
+      });
+    }
+    if (!this.options.notificationService.shouldPromptApproval(
+      this.options.context.id,
+      this.options.authenticatedLogin,
+      this.options.context.authenticatedUserId,
+      run,
+      env.environmentId,
+    )) return;
+    this.showToast(this.options.ports?.notifyApproval?.({
+      repositoryId: this.options.context.id,
+      runId: run.id,
+      workflowId: run.workflowId ?? 0,
+      title: run.displayTitle,
+      branch: run.branch,
+      environmentId: env.environmentId,
+      environmentName: env.environmentName,
+      canApprove: false,
+      ...(env.reason ? { reason: env.reason } : {}),
+      ...(env.requiredReviewers ? { requiredReviewers: env.requiredReviewers } : {}),
+      ...(autoApprovalBlocked ? { autoApprovalBlocked: true } : {}),
+    }));
   }
 
   /**
@@ -397,17 +479,37 @@ export class BackgroundMonitor {
     pendingEnvs: readonly PendingEnvironment[],
     deploymentRepo: DeploymentReviewPort,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<Set<number>> {
+    const blocked = new Set<number>();
     const scope = this.findOneRunScope(run.id);
-    if (!scope) return;
-    const covered = pendingEnvs.filter((env) => {
+    if (!scope) return blocked;
+    const inScope = pendingEnvs.filter((env) => scopeCoversEnvironment(scope.environments, env.environmentName));
+    for (const env of inScope) {
+      if (env.currentUserCanApprove) continue;
+      blocked.add(env.environmentId);
+      const key = `${run.id}:${env.environmentId}`;
+      if (this.skippedAuditKeys.has(key)) continue;
+      // Recorded once so the audit shows why the opt-in did nothing; a later eligible poll can still approve.
+      this.skippedAuditKeys.add(key);
+      await this.options.ports?.onAutoApprovalAudit?.({
+        timestamp: Date.now(),
+        repositoryId: this.options.context.id,
+        runId: run.id,
+        workflowId: run.workflowId ?? 0,
+        environmentId: env.environmentId,
+        environmentName: env.environmentName,
+        ruleId: scope.source,
+        status: "skipped",
+        error: env.reason ?? "GitHub reports this account cannot approve the environment.",
+      });
+    }
+    const covered = inScope.filter((env) => {
       const key = `${run.id}:${env.environmentId}`;
       return env.eligible &&
-        scopeCoversEnvironment(scope.environments, env.environmentName) &&
         !this.succeededAutoApprovals.has(key) &&
         !this.autoApprovedKeys.has(key);
     });
-    if (covered.length === 0 || !this.isActive()) return;
+    if (covered.length === 0 || !this.isActive()) return blocked;
     for (const env of covered) this.autoApprovedKeys.add(`${run.id}:${env.environmentId}`);
 
     const comment = "Auto-approved by ActionDeck: opted in when this run was dispatched";
@@ -442,6 +544,7 @@ export class BackgroundMonitor {
       });
       if (result.status === "succeeded") this.succeededAutoApprovals.add(`${run.id}:${env.environmentId}`);
     }
+    return blocked;
   }
 
   private findOneRunScope(runId: number): { readonly environments: readonly string[] | null; readonly source: string } | undefined {

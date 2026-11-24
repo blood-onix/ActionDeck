@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_WAIT_BEFORE_MINUTES } from "../domain/models/release-plan";
 
 const ref = z.string().min(1).max(255).refine((value) => !/[\u0000-\u001f\u007f]/.test(value));
 const workflowPath = z.string().min(1).max(256).regex(/^\.github\/workflows\/[^/]+\.(?:yml|yaml)$/i);
@@ -18,6 +19,9 @@ export const planSavePayload = z.object({
     inputs: inputValues,
     sensitiveInputKeys: z.array(z.string().min(1).max(128)).max(25),
     gate: z.enum(["on_success", "on_any_completion", "stop_on_non_success"]),
+    parallelWithPrevious: z.boolean().optional(),
+    waitBeforeMinutes: z.number().int().min(0).max(MAX_WAIT_BEFORE_MINUTES).optional(),
+    confirmBefore: z.boolean().optional(),
     autoApprove: z.object({
       environments: z.array(z.string().min(1).max(255)).max(50).nullable(),
     }).strict().optional(),

@@ -4,7 +4,15 @@ import { classifyGitHubError } from "../../github/client/classify-error";
 
 const elevatedTokens = new Set<string>();
 
+/** Adds `read:org`, which lets GitHub resolve team membership for environments whose reviewer is a team. */
+const ORG_SCOPES = ["read:org", "read:user", "repo"] as const;
+
 export async function getGitHubSession(interactive: boolean): Promise<vscode.AuthenticationSession | undefined> {
+  const withOrg = await vscode.authentication.getSession("github", [...ORG_SCOPES], { createIfNone: false });
+  if (withOrg) {
+    elevatedTokens.add(withOrg.accessToken);
+    return withOrg;
+  }
   const elevated = await vscode.authentication.getSession("github", ["read:user", "repo"], { createIfNone: false });
   if (elevated) {
     elevatedTokens.add(elevated.accessToken);
@@ -53,4 +61,15 @@ export async function withPrivateRepositoryEscalation<T>(
     onElevated?.(elevated);
     return operation(elevated);
   }
+}
+
+export function hasOrgReadAccess(session?: vscode.AuthenticationSession): boolean {
+  return Boolean(session?.scopes?.includes("read:org"));
+}
+
+/** Asks GitHub for `read:org` on top of the repository scopes; never changes the signed-in account silently. */
+export async function requestOrgReadAccess(): Promise<vscode.AuthenticationSession | undefined> {
+  const session = await vscode.authentication.getSession("github", [...ORG_SCOPES], { createIfNone: true });
+  if (session) elevatedTokens.add(session.accessToken);
+  return session;
 }

@@ -111,6 +111,90 @@ describe("BackgroundMonitor", () => {
     scheduler.dispose();
   });
 
+  it("keeps polling and shows each run's toast while an earlier toast is still open", async () => {
+    const memento = new MemoryMemento();
+    const scheduler = new RepositoryScheduler(3);
+    const notified: Array<string | undefined> = [];
+    let pollRuns: WorkflowRunRecord[] = [];
+
+    const monitor = new BackgroundMonitor({
+      context,
+      authenticatedLogin: "octocat",
+      token: "tok",
+      scheduler,
+      planStore: new PlanStore(memento),
+      planService: new ReleasePlanService(new PlanStore(memento)),
+      notificationService: new NotificationService(new SubscriptionStore(memento)),
+      autoApprovalService: new AutoApprovalService(new ApprovalRuleStore(memento)),
+      statusTicker: { update: vi.fn() },
+      ports: {
+        loadRecentRuns: async () => ({ runs: pollRuns }),
+        // A toast promise stays pending until the user dismisses it.
+        notify: (n) => {
+          notified.push(n.workflowName);
+          return new Promise<void>(() => {});
+        },
+      },
+    });
+
+    await monitor.pollOnce();
+    pollRuns = [
+      makeRun({ id: 10, workflowId: 1, workflowName: "CI", displayTitle: "pr-#1 fix" }),
+      makeRun({ id: 11, workflowId: 2, workflowName: "Lint", displayTitle: "pr-#1 fix" }),
+    ];
+    await monitor.pollOnce();
+    expect(notified).toEqual(["CI", "Lint"]);
+
+    await monitor.pollOnce();
+    expect(notified).toEqual(["CI", "Lint"]);
+
+    monitor.dispose();
+    scheduler.dispose();
+  });
+
+  it("prompts for a pending approval while an earlier run toast is still open", async () => {
+    const memento = new MemoryMemento();
+    const scheduler = new RepositoryScheduler(3);
+    const prompts: string[] = [];
+    let pollRuns: WorkflowRunRecord[] = [];
+
+    const monitor = new BackgroundMonitor({
+      context,
+      authenticatedLogin: "octocat",
+      token: "tok",
+      scheduler,
+      planStore: new PlanStore(memento),
+      planService: new ReleasePlanService(new PlanStore(memento)),
+      notificationService: new NotificationService(new SubscriptionStore(memento)),
+      autoApprovalService: new AutoApprovalService(new ApprovalRuleStore(memento)),
+      statusTicker: { update: vi.fn() },
+      ports: {
+        loadRecentRuns: async () => ({ runs: pollRuns }),
+        notify: () => new Promise<void>(() => {}),
+        createDeploymentRepository: () => ({
+          listPendingDeployments: async (runId) => runId === 21
+            ? [{ environmentId: 7, environmentName: "qa", eligible: true, currentUserCanApprove: true, waitTimerRemainingSeconds: 0 }]
+            : [],
+          submitReview: async () => undefined,
+        }),
+        notifyApproval: (prompt) => {
+          prompts.push(`${prompt.runId}:${prompt.environmentName}`);
+          return new Promise<void>(() => {});
+        },
+      },
+    });
+
+    await monitor.pollOnce();
+    pollRuns = [makeRun({ id: 20 })];
+    await monitor.pollOnce();
+    pollRuns = [makeRun({ id: 20 }), makeRun({ id: 21, status: "waiting", conclusion: null })];
+    await monitor.pollOnce();
+    expect(prompts).toEqual(["21:qa"]);
+
+    monitor.dispose();
+    scheduler.dispose();
+  });
+
   it("advances a started release plan past step 1 when the step 1 run completes, and ignores unmatched runs", async () => {
     const memento = new MemoryMemento();
     const scheduler = new RepositoryScheduler(3);
@@ -513,6 +597,95 @@ describe("BackgroundMonitor", () => {
     });
     await monitor.pollOnce();
     expect(submittedReviews).toEqual([7]);
+    monitor.dispose();
+    scheduler.dispose();
+  });
+  it("notifies instead of silently dropping an own-run gate the account cannot approve, and audits the skipped opt-in", async () => {
+    const memento = new MemoryMemento();
+    const scheduler = new RepositoryScheduler(3);
+    const planStore = new PlanStore(memento);
+    const grants = new RunApprovalGrantService(new RunApprovalGrantStore(memento));
+    const submitted: number[] = [];
+    const prompts: Array<{ runId: number; canApprove: boolean; autoApprovalBlocked?: boolean; reason?: string }> = [];
+    const audits: Array<{ status: string; error?: string }> = [];
+    const ineligible: string[] = [];
+    const statusCounts: number[] = [];
+    const submittedAt = Date.now() - 5_000;
+    // Reusable-workflow environments are unresolved, so the grant covers every gate.
+    await grants.grant(context, { workflowId: 30, ref: "main", environments: null, submittedAt, acceptedAt: submittedAt + 500 });
+    const recent = new Date(submittedAt + 1_000).toISOString();
+    const runs = [
+      makeRun({ id: 1001, workflowId: 30, status: "waiting", conclusion: null, createdAt: recent }),
+      // A teammate's run on a gate this account cannot approve is not the user's business.
+      makeRun({ id: 1002, workflowId: 31, status: "waiting", conclusion: null, actor: { id: 99, login: "teammate" } }),
+      // A wait timer clears by itself: no prompt.
+      makeRun({ id: 1003, workflowId: 32, status: "waiting", conclusion: null }),
+    ];
+    const blocked: PendingEnvironment = {
+      environmentId: 5,
+      environmentName: "dev",
+      eligible: false,
+      currentUserCanApprove: false,
+      waitTimerRemainingSeconds: 0,
+      requiredReviewers: ["team-twins-infra"],
+      reason: "Authenticated user is not an authorized reviewer for this environment.",
+    };
+    const pendingByRun: Record<number, PendingEnvironment[]> = {
+      1001: [blocked],
+      1002: [blocked],
+      1003: [{ environmentId: 6, environmentName: "qa", eligible: false, currentUserCanApprove: true, waitTimerRemainingSeconds: 60 }],
+    };
+    const monitor = new BackgroundMonitor({
+      context,
+      authenticatedLogin: "octocat",
+      token: "tok",
+      scheduler,
+      planStore,
+      planService: new ReleasePlanService(planStore),
+      notificationService: new NotificationService(new SubscriptionStore(memento)),
+      autoApprovalService: new AutoApprovalService(new ApprovalRuleStore(memento)),
+      runApprovalGrants: grants,
+      statusTicker: { update: (_plans, pending) => { statusCounts.push(pending); } },
+      ports: {
+        loadRecentRuns: async () => ({ runs }),
+        createDispatchRepository: () => ({}) as unknown as DispatchSubmissionRepository,
+        createDeploymentRepository: () => ({
+          listPendingDeployments: async (runId) => pendingByRun[runId] ?? [],
+          submitReview: async (_runId, environmentId) => {
+            submitted.push(environmentId);
+          },
+        }),
+        notifyApproval: (prompt) => {
+          prompts.push({
+            runId: prompt.runId,
+            canApprove: prompt.canApprove,
+            ...(prompt.autoApprovalBlocked ? { autoApprovalBlocked: true } : {}),
+            ...(prompt.reason ? { reason: prompt.reason } : {}),
+          });
+        },
+        onAutoApprovalAudit: (entry) => {
+          audits.push({ status: entry.status, ...(entry.error ? { error: entry.error } : {}) });
+        },
+        onIneligibleGate: (details) => {
+          ineligible.push(`${details.runId}:${details.environmentName}`);
+        },
+      },
+    });
+
+    await monitor.pollOnce();
+    await monitor.pollOnce();
+
+    expect(submitted).toEqual([]);
+    expect(prompts).toEqual([{ runId: 1001, canApprove: false, autoApprovalBlocked: true, reason: blocked.reason }]);
+    expect(audits).toEqual([{ status: "skipped", error: blocked.reason }]);
+    expect(ineligible).toEqual(["1001:dev"]);
+    // Nothing ActionDeck can act on, so the actionable count stays at zero.
+    expect(statusCounts).toEqual([0, 0]);
+
+    // Once GitHub reports the gate as approvable (for example after granting read:org), the opt-in applies.
+    pendingByRun[1001] = [{ ...blocked, eligible: true, currentUserCanApprove: true }];
+    await monitor.pollOnce();
+    expect(submitted).toEqual([5]);
     monitor.dispose();
     scheduler.dispose();
   });

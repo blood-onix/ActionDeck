@@ -96,3 +96,25 @@ describe("Release plan protocol contracts", () => {
     expect(s4.text).toBe("$(layers) 3");
   });
 });
+
+describe("dashboard plan projection", () => {
+  it("accepts plans whose steps opted into auto-approval", async () => {
+    const { dashboardPlanSchema } = await import("../../src/protocol/dashboard");
+    const plan = {
+      id: "plan-1", name: "Release", repositoryId: "repo-1", state: "draft", currentStepIndex: 0, updatedAt: 1,
+      steps: [
+        {
+          id: "step-1", workflowId: 1, workflowPath: ".github/workflows/infra-network.yml", ref: "main",
+          inputs: { environment: "qa" }, sensitiveInputKeys: [], gate: "on_success", state: "pending",
+          autoApprove: { environments: ["qa"] },
+        },
+        {
+          id: "step-2", workflowId: 2, workflowPath: ".github/workflows/infra-storage.yml", ref: "main",
+          inputs: {}, sensitiveInputKeys: [], gate: "on_success", state: "pending",
+          autoApprove: { environments: null },
+        },
+      ],
+    };
+    expect(dashboardPlanSchema.safeParse(plan).success).toBe(true);
+  });
+});

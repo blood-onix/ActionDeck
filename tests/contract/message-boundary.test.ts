@@ -125,4 +125,9 @@ describe("settings projection redaction", () => {
     const leaky = successResponse("r", { secrets: [{ name: "X", value: "hunter2" }], token: "abc", clientSecret: "s" });
     expect(leaky.ok && leaky.data).toEqual({});
   });
+  it("accepts a deployment review reply but rejects a bare array, which would surface as a generic failure", () => {
+    const results = [{ environmentId: 3, status: "succeeded" }];
+    expect(() => successResponse("review", results as unknown as Record<string, unknown>)).toThrow(/must be objects/);
+    expect(successResponse("review", { runId: 77, results })).toMatchObject({ requestId: "review", ok: true });
+  });
 });

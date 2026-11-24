@@ -42,6 +42,8 @@ interface DispatchValidation {
     errors: Record<string, string>;
   };
   reviewToken?: string;
+  /** Whether the GitHub token can read team membership, which team-reviewed environments may need. */
+  orgReadAccess?: boolean;
   environmentInventory?: {
     state: "loaded" | "partial" | "permission_restricted" | "unavailable";
     names?: string[];
@@ -49,6 +51,11 @@ interface DispatchValidation {
     manualEntryAllowed?: boolean;
   };
 }
+
+// GitHub usually creates a dispatched run 1-3s after accepting the request, so poll quickly at first.
+const ASSOCIATION_RETRY_DELAYS_MS = [1_500, 2_000, 3_000, 5_000, 8_000, 13_000, 15_000] as const;
+// Matches the host's association window (seconds after acceptance a run may still be matched).
+const ASSOCIATION_WINDOW_MS = 120_000;
 
 type DispatchResult = (
   | {
@@ -99,6 +106,8 @@ export function Companion({
   const [result, setResult] = useState<DispatchResult>();
   const [submitting, setSubmitting] = useState(false);
   const [associating, setAssociating] = useState(false);
+  const [autoAssociating, setAutoAssociating] = useState(false);
+  const [associationTimedOut, setAssociationTimedOut] = useState(false);
   const [loading, setLoading] = useState(false);
   const [reuseNotice, setReuseNotice] = useState<{
     runId: number;
@@ -296,7 +305,7 @@ export function Companion({
         submittedAt: result.submittedAt,
         acceptedAt: result.acceptedAt,
       });
-      setResult(association);
+      setResult({ ...association, ...(result.autoApproval ? { autoApproval: result.autoApproval } : {}) });
       if (association.state === "associated_run_found" || association.state === "completed") onDispatched?.();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -305,14 +314,67 @@ export function Companion({
     }
   }
 
+  // Keep looking for the dispatched run on a short backoff instead of waiting for a manual "Find run".
+  useEffect(() => {
+    if (workflowId === undefined || result?.state !== "request_accepted" || result.association !== "not_observed") {
+      return;
+    }
+    const accepted = result;
+    const targetRef = remote?.target.ref ?? ref;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      if (Date.now() - accepted.acceptedAt >= ASSOCIATION_WINDOW_MS) {
+        setAutoAssociating(false);
+        setAssociationTimedOut(true);
+        return;
+      }
+      const delay = ASSOCIATION_RETRY_DELAYS_MS[Math.min(attempt, ASSOCIATION_RETRY_DELAYS_MS.length - 1)];
+      attempt += 1;
+      timer = setTimeout(() => void poll(), delay);
+    };
+
+    const poll = async () => {
+      try {
+        const association = await bridge.request<DispatchResult>("dispatch.association", {
+          workflowId,
+          ref: targetRef,
+          submittedAt: accepted.submittedAt,
+          acceptedAt: accepted.acceptedAt,
+        });
+        if (cancelled) return;
+        if (association.state === "request_accepted" && association.association === "not_observed") {
+          scheduleNext();
+          return;
+        }
+        setResult({ ...association, ...(accepted.autoApproval ? { autoApproval: accepted.autoApproval } : {}) });
+        if (association.state === "associated_run_found" || association.state === "completed") onDispatched?.();
+      } catch {
+        scheduleNext();
+      }
+    };
+
+    setAssociationTimedOut(false);
+    setAutoAssociating(true);
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      setAutoAssociating(false);
+    };
+  }, [result, workflowId, bridge]);
+
   const trackerStage: DispatchTrackerStage | null = useMemo(() => {
     if (submitting) return "submitting";
-    if (associating) return "associating";
+    if (associating || autoAssociating) return "associating";
     if (!result) return null;
     if (result.state === "request_accepted") return "accepted";
     if (result.state === "associated_run_found" || result.state === "completed") return "found";
     return "uncertain";
-  }, [submitting, associating, result]);
+  }, [submitting, associating, autoAssociating, result]);
 
   const targetRefLabel = remote?.target.ref || ref || "main";
   const targetShaLabel = remote?.target.sha ? ` @ ${remote.target.sha.slice(0, 7)}` : "";
@@ -469,6 +531,15 @@ export function Companion({
           }}
           checked={autoApprove}
           disabled={submitting}
+          orgReadAccess={remote.orgReadAccess}
+          onGrantOrgAccess={() => {
+            void bridge
+              .request<{ granted: boolean; orgReadAccess: boolean }>("auth.grantOrgAccess", {})
+              .then((response) => {
+                setRemote((current) => current && { ...current, orgReadAccess: response.orgReadAccess });
+              })
+              .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+          }}
           onChange={setAutoApprove}
         />
       ) : null}
@@ -484,7 +555,7 @@ export function Companion({
         <div style={{ marginBottom: "var(--space-5)" }}>
           <DispatchTracker
             stage={trackerStage}
-            detail={result ? dispatchResultMessage(result) : undefined}
+            detail={result ? dispatchResultMessage(result, associationTimedOut) : undefined}
             actions={
               result?.state === "request_accepted" || result?.state === "outcome_uncertain" ? (
                 <Button
@@ -569,11 +640,14 @@ function inputFingerprint(input: DispatchInputDefinition): unknown[] {
   ];
 }
 
-function dispatchResultMessage(result: DispatchResult): string {
+function dispatchResultMessage(result: DispatchResult, associationTimedOut = false): string {
   const armed = result.autoApproval
     ? ` Auto-approval armed for ${result.autoApproval.environments === null ? "every gate of this run" : result.autoApproval.environments.join(", ")}.`
     : "";
-  return dispatchStateMessage(result) + armed;
+  const message = associationTimedOut && result.state === "request_accepted" && result.association === "not_observed"
+    ? "GitHub accepted the dispatch, but no matching run appeared within 2 minutes. Use Find run to check again."
+    : dispatchStateMessage(result);
+  return message + armed;
 }
 
 function dispatchStateMessage(result: DispatchResult): string {

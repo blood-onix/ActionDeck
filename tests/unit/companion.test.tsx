@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Companion } from "../../webview/src/companion/Companion";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const remoteInputs = [
   { name: "release", type: "string", required: true, sourceRef: "main" },
@@ -327,6 +330,72 @@ describe("workflow Companion dispatch form", () => {
       submittedAt: 1_800_000_000_000,
       acceptedAt: 1_800_000_001_000,
     });
+  });
+
+  it("keeps polling for the dispatched run after acceptance without a manual Find run", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const acceptedAt = Date.now();
+    let associationCalls = 0;
+    const bridge = {
+      request: vi.fn(async (operation: string, payload: Record<string, unknown>) => {
+        if (operation === "workflow.localPreview") {
+          return {
+            workflowPath: ".github/workflows/release.yml",
+            dispatchable: true,
+            inputs: remoteInputs,
+            warning: "This local YAML is preview-only and will not be executed or uploaded.",
+          };
+        }
+        if (operation === "dispatch.submit") {
+          return {
+            state: "request_accepted",
+            association: "not_observed",
+            submittedAt: acceptedAt - 500,
+            acceptedAt,
+            autoApproval: { environments: null },
+          };
+        }
+        if (operation === "dispatch.association") {
+          associationCalls += 1;
+          if (associationCalls === 1) {
+            return { state: "request_accepted", association: "not_observed", submittedAt: acceptedAt - 500, acceptedAt };
+          }
+          return {
+            state: "associated_run_found",
+            runId: 42,
+            runStatus: "queued",
+            htmlUrl: "https://github.com/acme/demo/actions/runs/42",
+          };
+        }
+        return remoteResponse(payload.inputs as Record<string, string>, payload.review === true);
+      }),
+    };
+    render(<Companion
+      bridge={bridge}
+      workflowId={7}
+      workflowPath=".github/workflows/release.yml"
+      workflowName="Release"
+      onClose={() => undefined}
+    />);
+
+    await screen.findByLabelText(/^release/i);
+    fireEvent.change(screen.getByLabelText(/^release/i), { target: { value: "2026.11" } });
+    fireEvent.click(screen.getByLabelText(/^dry_run/i));
+    fireEvent.change(screen.getByLabelText(/^region/i), { target: { value: "eu" } });
+    fireEvent.change(screen.getByLabelText(/^version/i), { target: { value: "2.0" } });
+    fireEvent.change(screen.getByLabelText(/^target/i), { target: { value: "production" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
+    await screen.findByText(/GitHub accepted the dispatch/);
+    expect(associationCalls).toBe(0);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_500); });
+    expect(associationCalls).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(associationCalls).toBe(2);
+    expect(await screen.findByText(/Run #42 observed \(queued\)\. Auto-approval armed/)).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(associationCalls).toBe(2);
   });
 
   it("invalidates the review token when target values change and does not submit stale values", async () => {

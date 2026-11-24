@@ -48,9 +48,10 @@ import { createGitHubClient } from "../../github/client/github-client";
 import { parseSupportedGitHubRunUrl } from "../../domain/services/external-links";
 import { runMetrics } from "../../domain/services/run-metrics";
 import { hostEvent } from "../../protocol/envelopes";
-import { approvalAuditSchema, dashboardDataSchema, tabWorkflowPathPattern, viewOpenInTabPayload } from "../../protocol/dashboard";
-import { columnLayoutSavePayload, columnLayoutSchema, workflowGroupsSchema, workflowSetGroupPayload } from "../../protocol/preferences";
-import type { ReleasePlan } from "../../domain/models/release-plan";
+import { approvalAuditSchema, dashboardDataSchema, dashboardPlanSchema, tabWorkflowPathPattern, viewOpenInTabPayload } from "../../protocol/dashboard";
+import { columnLayoutSavePayload, columnLayoutSchema, runRefreshSavePayload, workflowGroupsSchema, workflowSetGroupPayload } from "../../protocol/preferences";
+import { normalizeRunRefreshSeconds, RUN_REFRESH_SETTING } from "../../domain/models/settings";
+import { EDITABLE_PLAN_STATES, type ReleasePlan } from "../../domain/models/release-plan";
 import type { WorkflowRunRecord } from "../../domain/models/run";
 import {
   planExplainBlockedPayload,
@@ -73,7 +74,9 @@ import { explainBlockedPlan } from "../../application/copilot/plan-explanation";
 import { openWorkflowFixDiff, proposeCommentPreservingYamlFix, WorkflowProposalProvider } from "../providers/workflow-diff";
 import {
   getGitHubSession,
+  hasOrgReadAccess,
   hasPrivateRepositoryAccess,
+  requestOrgReadAccess,
   requestPrivateRepositoryAccess,
   withPrivateRepositoryEscalation,
 } from "../providers/github-authentication";
@@ -84,6 +87,7 @@ import { DispatchInputHistory } from "../../application/dispatch/dispatch-input-
 import { currentWorkspaceBranch, discoverWorkspaceRepositories } from "../providers/workspace-repositories";
 import { createRepositoryContext } from "../../application/repositories/repository-service";
 import { recoverInterruptedPlans } from "../../application/plans/plan-recovery";
+import { planStageError } from "../../domain/services/plan-transitions";
 import { NotificationService } from "../../application/runs/notification-service";
 import { BackgroundMonitor } from "../providers/background-monitor";
 import { RepositoryState } from "../../persistence/workspace-state";
@@ -149,6 +153,35 @@ export function registerDashboardCommands(
   // One monitor and one immutable context per repository keeps plans bound to the repository that created them.
   const monitors = new Map<string, BackgroundMonitor>();
   const boundContexts = new Map<string, RepositoryContext>();
+  let diagnostics: vscode.OutputChannel | undefined;
+  /** Writes why a gate was not approvable, so a wrong account or a missing scope is visible. */
+  const logIneligibleGate = (
+    repoContext: RepositoryContext,
+    session: vscode.AuthenticationSession,
+    details: { runId: number; environmentName: string; reason?: string },
+  ) => {
+    diagnostics ??= vscode.window.createOutputChannel("ActionDeck");
+    const scopes = session.scopes?.length ? session.scopes.join(", ") : "unknown";
+    diagnostics.appendLine(
+      `[${new Date().toISOString()}] ${repoContext.owner}/${repoContext.repo} run ${details.runId}: ` +
+      `GitHub returned current_user_can_approve=false for environment "${details.environmentName}" ` +
+      `(signed in as ${session.account.label}; token scopes: ${scopes}).` +
+      (hasOrgReadAccess(session) ? "" : " The token lacks read:org, which GitHub may need to resolve team reviewers."),
+    );
+  };
+  /** Re-authenticates with read:org and hands the new token to every monitor of the same account. */
+  const grantOrgReadAccess = async (): Promise<boolean> => {
+    const upgraded = await requestOrgReadAccess();
+    if (!upgraded) return false;
+    for (const [repositoryId, monitor] of monitors) {
+      if (boundContexts.get(repositoryId)?.authenticatedUserId === upgraded.account.id) {
+        monitor.updateToken(upgraded.accessToken);
+        void monitor.pollOnce();
+      }
+    }
+    if (selectedSession?.account.id === upgraded.account.id) selectedSession = upgraded;
+    return true;
+  };
   const lookupWorkflowEntry = <T,>(
     mapByRepo: ReadonlyMap<string, ReadonlyMap<string, T>>,
     uri: vscode.Uri,
@@ -182,6 +215,8 @@ export function registerDashboardCommands(
     workspaceTree.refresh();
   };
   const planService = new ReleasePlanService(planStore, (updated) => {
+    // Keeps the timer for a stage's wait in step with the plan, whatever moved it into or out of the hold.
+    localPlanScheduler.syncHold(updated);
     statusTicker.updatePlans(updated.repositoryId, planStore.list(updated.repositoryId));
     for (const observe of planObservers) observe(updated);
   });
@@ -205,6 +240,28 @@ export function registerDashboardCommands(
       await planService.startPlan(repo, repoContext, planId);
     } catch (error) {
       await pauseWith(error instanceof AppError ? error.message : "Scheduled start failed before dispatch.");
+    }
+  }, async (planId) => {
+    // A stage's wait elapsed: continue the plan, or ask the user when that is not safe to do unattended.
+    const bound = [...boundContexts.values()].find((candidate) => planStore.get(candidate.id, planId));
+    if (!bound) return;
+    const plan = planStore.get(bound.id, planId);
+    if (!plan || plan.state !== "on_hold") return;
+    const askUser = async (reason: string) => {
+      await planService.savePlan({ ...plan, hold: { kind: "confirm" }, blockedReason: reason });
+    };
+    const session = await getGitHubSession(false);
+    if (!session || (bound.authenticatedUserId && session.account.id !== bound.authenticatedUserId)) {
+      await askUser("The wait finished, but the GitHub identity for this repository is unavailable. Continue when it is.");
+      return;
+    }
+    const repoContext = bound.authenticatedUserId ? bound : { ...bound, authenticatedUserId: session.account.id };
+    ensureBackgroundMonitor(repoContext, session);
+    try {
+      const repo = new DispatchRepository(scheduler, repoContext, session.accessToken);
+      await planService.continuePlan(repo, repoContext, planId, "timer");
+    } catch (error) {
+      await askUser(error instanceof AppError ? error.message : "The plan could not continue after its wait.");
     }
   });
 
@@ -231,7 +288,8 @@ export function registerDashboardCommands(
       ports: {
         notify: async (notification) => {
           const rerunBy = notification.triggeringActor ? `, re-run by ${notification.triggeringActor}` : "";
-          const message = `${notification.title} (${notification.conclusion ?? "completed"}${rerunBy})`;
+          const workflow = notification.workflowName ? `${notification.workflowName}: ` : "";
+          const message = `${workflow}${notification.title} (${notification.conclusion ?? "completed"}${rerunBy})`;
           const show = notification.conclusion === "failure" || notification.conclusion === "timed_out"
             ? vscode.window.showWarningMessage
             : vscode.window.showInformationMessage;
@@ -241,13 +299,48 @@ export function registerDashboardCommands(
           }
         },
         notifyApproval: async (prompt) => {
+          if (!prompt.canApprove) {
+            // The monitor outlives token upgrades, so read the current session rather than the one it started with.
+            const current = (await getGitHubSession(false)) ?? session;
+            const reviewers = prompt.requiredReviewers?.length ? ` Reviewers: ${prompt.requiredReviewers.join(", ")}.` : "";
+            const lead = prompt.autoApprovalBlocked
+              ? `Auto-approve could not run for "${prompt.title}"`
+              : `"${prompt.title}" is waiting for approval`;
+            const grantLabel = "Grant team access (read:org)";
+            const action = await vscode.window.showWarningMessage(
+              `${lead}: GitHub reports ${current.account.label} cannot approve environment ${prompt.environmentName}.${reviewers}`,
+              ...(hasOrgReadAccess(current) ? [] : [grantLabel]),
+              "Inspect Run",
+              "Open on GitHub",
+            );
+            if (action === grantLabel) {
+              await grantOrgReadAccess();
+            } else if (action === "Inspect Run" && await selectBoundRepository(prompt.repositoryId)) {
+              await vscode.commands.executeCommand("actiondeck.openDashboard", undefined, undefined, prompt.runId);
+            } else if (action === "Open on GitHub") {
+              const target = boundContexts.get(prompt.repositoryId) ?? repoContext;
+              await vscode.env.openExternal(vscode.Uri.parse(
+                `https://github.com/${target.owner}/${target.repo}/actions/runs/${prompt.runId}`,
+              ));
+            }
+            return;
+          }
+          // Review Run opens the run itself (jobs, logs, plan output) with Approve / Reject beside it, so the
+          // decision is made with context; the Action Center stays the inbox for going through several gates.
           const action = await vscode.window.showInformationMessage(
             `Approval needed for "${prompt.title}" on ${prompt.branch}: environment ${prompt.environmentName}`,
+            "Review Run",
             "Open Action Center",
           );
-          if (action === "Open Action Center" && await selectBoundRepository(prompt.repositoryId)) {
+          if (!action || !await selectBoundRepository(prompt.repositoryId)) return;
+          if (action === "Review Run") {
+            await vscode.commands.executeCommand("actiondeck.openDashboard", undefined, undefined, prompt.runId);
+          } else if (action === "Open Action Center") {
             await vscode.commands.executeCommand("actiondeck.openDashboard", undefined, undefined, undefined, "action-center");
           }
+        },
+        onIneligibleGate: (details) => {
+          void getGitHubSession(false).then((current) => logIneligibleGate(repoContext, current ?? session, details));
         },
         onRunsObserved: (runs) => {
           const summaries = latestRunsByRepository.get(repoContext.id) ?? new Map<string, LatestRunSummary>();
@@ -336,12 +429,17 @@ export function registerDashboardCommands(
               await planService.savePlan(evaluated);
             }
           }
+          if (plan.state === "on_hold") {
+            const restored = localPlanScheduler.restoreHold(plan);
+            if (restored !== plan) await planService.savePlan(restored);
+          }
         }
         const restoredPlans = planStore.list(repoContext.id);
         statusTicker.update(restoredPlans, 0, repoContext.id);
+        // A one-run auto-approval granted before a reload still needs the monitor to reach its gate.
         const needsMonitoring = restoredPlans.some((plan) =>
           plan.state === "running" || plan.state === "waiting_approval" || plan.state === "scheduled",
-        );
+        ) || runApprovalGrants.list(repoContext.id).length > 0;
         if (session && needsMonitoring) ensureBackgroundMonitor(repoContext, session);
       }
     } catch {
@@ -465,7 +563,10 @@ export function registerDashboardCommands(
         }),
         customGroups: [...new Set(Object.values(groups))].sort((a, b) => a.localeCompare(b)),
         ...(storedLayout.success ? { columnLayout: storedLayout.data } : {}),
-        plans: planStore.list(activeContext.id),
+        runRefreshSeconds: normalizeRunRefreshSeconds(
+          vscode.workspace.getConfiguration("actiondeck").get<number>(RUN_REFRESH_SETTING),
+        ),
+        plans: displayablePlans(planStore.list(activeContext.id)),
         approvalRules: autoApprovalService.listRules(activeContext.id),
         approvalAudit: (Array.isArray(storedAudit) ? storedAudit : [])
           .filter((entry) => approvalAuditSchema.safeParse(entry).success)
@@ -581,7 +682,7 @@ export function registerDashboardCommands(
           historyAccess,
           subscriptionStore.listModes(activeContext.id),
         ),
-        plans: planStore.list(activeContext.id),
+        plans: displayablePlans(planStore.list(activeContext.id)),
         approvalRules: autoApprovalService.listRules(activeContext.id),
         approvalAudit: (Array.isArray(storedAudit) ? storedAudit : [])
           .filter((entry) => approvalAuditSchema.safeParse(entry).success)
@@ -829,6 +930,13 @@ export function registerDashboardCommands(
           throw classifyGitHubError(error);
         }
       },
+      "auth.grantOrgAccess": async () => {
+        assertActiveIdentity();
+        const granted = await grantOrgReadAccess();
+        const current = await getGitHubSession(false);
+        if (current && current.account.id === activeContext.authenticatedUserId) panelSession = current;
+        return { granted, orgReadAccess: granted || hasOrgReadAccess(current) };
+      },
       "dispatch.validate": async (payload, signal) => {
         assertActiveIdentity();
         const parsed = dispatchValidatePayload.safeParse(payload);
@@ -876,6 +984,8 @@ export function registerDashboardCommands(
           return {
             target,
             validation,
+            // Read the live sign-in: a read:org grant made from another panel or notification counts at once.
+            orgReadAccess: hasOrgReadAccess(panelSession) || hasOrgReadAccess(await getGitHubSession(false)),
             ...(reviewToken ? { reviewToken } : {}),
             ...(environmentInventory ? { environmentInventory } : {}),
           };
@@ -1079,16 +1189,33 @@ export function registerDashboardCommands(
         assertActiveIdentity();
         const parsed = planSavePayload.safeParse(payload);
         if (!parsed.success) throw new AppError("invalid_input", "Release plan payload is invalid.");
+        const existing = planStore.get(activeContext.id, parsed.data.id);
+        if (existing && !EDITABLE_PLAN_STATES.has(existing.state)) {
+          throw new AppError("stale", "This plan has already started, so it can no longer be edited.");
+        }
+        const stageError = planStageError(parsed.data.steps);
+        if (stageError) throw new AppError("invalid_input", stageError);
+        // An edit may drop or move the schedule; the old timer must not fire the plan.
+        if (existing) localPlanScheduler.clearTimer(existing.id);
         const plan = {
           id: parsed.data.id,
           name: parsed.data.name,
           repositoryId: activeContext.id,
           state: parsed.data.schedule ? ("scheduled" as const) : ("draft" as const),
-          steps: parsed.data.steps.map(({ autoApprove, ...step }) => ({
-            ...step,
-            ...(autoApprove ? { autoApprove } : {}),
-            state: "pending" as const,
-          })),
+          steps: parsed.data.steps.map(({ autoApprove, parallelWithPrevious, waitBeforeMinutes, confirmBefore, ...step }, index) => {
+            // A stage's wait and confirmation live on its first step; the first stage never has them.
+            const startsStage = index > 0 && !parallelWithPrevious;
+            return {
+              ...step,
+              // Older builds offered a separate "stop on non-success" gate that behaved like on_success.
+              gate: step.gate === "stop_on_non_success" ? "on_success" as const : step.gate,
+              ...(index > 0 && parallelWithPrevious ? { parallelWithPrevious: true } : {}),
+              ...(startsStage && waitBeforeMinutes ? { waitBeforeMinutes } : {}),
+              ...(startsStage && confirmBefore ? { confirmBefore: true } : {}),
+              ...(autoApprove ? { autoApprove } : {}),
+              state: "pending" as const,
+            };
+          }),
           currentStepIndex: 0,
           ...(parsed.data.schedule
             ? {
@@ -1151,6 +1278,32 @@ export function registerDashboardCommands(
           signal,
         );
       },
+      "plan.continue": async (payload, signal) => {
+        assertActiveIdentity();
+        const parsed = planControlPayload.safeParse(payload);
+        if (!parsed.success) throw new AppError("invalid_input", "Plan continue request is invalid.");
+        localPlanScheduler.clearHold(parsed.data.planId);
+        return planService.continuePlan(
+          createDispatchRepository(),
+          activeContext,
+          parsed.data.planId,
+          "user",
+          parsed.data.runtimeInputs,
+          signal,
+        );
+      },
+      "plan.retry": async (payload, signal) => {
+        assertActiveIdentity();
+        const parsed = planControlPayload.safeParse(payload);
+        if (!parsed.success) throw new AppError("invalid_input", "Plan retry request is invalid.");
+        return planService.retryPlan(
+          createDispatchRepository(),
+          activeContext,
+          parsed.data.planId,
+          parsed.data.runtimeInputs,
+          signal,
+        );
+      },
       "plan.stop": async (payload) => {
         assertActiveIdentity();
         const parsed = planControlPayload.safeParse(payload);
@@ -1188,12 +1341,14 @@ export function registerDashboardCommands(
           inputs: { comment: parsed.data.comment ?? "" },
         });
         const repo = new DeploymentRepository(scheduler, activeContext, panelSession.accessToken, dashboardLease);
-        return reviewPendingDeployments(repo, activeContext, authorization, {
+        // Wrapped in an object: the response boundary only accepts object projections, never bare arrays.
+        const results = await reviewPendingDeployments(repo, activeContext, authorization, {
           runId: parsed.data.runId,
           environmentIds: parsed.data.environmentIds,
           state: parsed.data.state,
           ...(parsed.data.comment !== undefined ? { comment: parsed.data.comment } : {}),
         }, signal);
+        return { runId: parsed.data.runId, results };
       },
       "approvalRule.save": async (payload) => {
         assertActiveIdentity();
@@ -1238,6 +1393,13 @@ export function registerDashboardCommands(
         if (!parsed.success) throw new AppError("invalid_input", "Column layout is invalid.");
         await new RepositoryState(mementoAdapter, activeContext.id).update("columnLayout", parsed.data.layout);
         return { saved: true };
+      },
+      "preferences.saveRunRefresh": async (payload) => {
+        const parsed = runRefreshSavePayload.safeParse(payload);
+        if (!parsed.success) throw new AppError("invalid_input", "Refresh interval is invalid.");
+        await vscode.workspace.getConfiguration("actiondeck")
+          .update(RUN_REFRESH_SETTING, parsed.data.seconds, vscode.ConfigurationTarget.Global);
+        return { seconds: parsed.data.seconds };
       },
       "settings.cachedCards": async () => {
         assertActiveIdentity();
@@ -1425,6 +1587,29 @@ export function registerDashboardCommands(
       if (panelRunObservers.size === 0) runObservers.delete(activeContext.id);
       disposal.dispose();
     });
+  });
+  /** Shows which GitHub account and token scopes ActionDeck is using, so a missing read:org is easy to confirm. */
+  const showGitHubAccess = vscode.commands.registerCommand("actiondeck.showGitHubAccess", async () => {
+    const current = await getGitHubSession(false);
+    if (!current) {
+      void vscode.window.showWarningMessage("ActionDeck is not signed in to GitHub. Open the dashboard to sign in.");
+      return;
+    }
+    const scopes = current.scopes?.length ? [...current.scopes].sort().join(", ") : "none reported";
+    const orgRead = hasOrgReadAccess(current);
+    diagnostics ??= vscode.window.createOutputChannel("ActionDeck");
+    diagnostics.appendLine(
+      `[${new Date().toISOString()}] GitHub access: signed in as ${current.account.label}; token scopes: ${scopes}.`,
+    );
+    const grantLabel = "Grant team access (read:org)";
+    const action = await vscode.window.showInformationMessage(
+      `ActionDeck is signed in to GitHub as ${current.account.label}. Token scopes: ${scopes}. ` +
+      (orgRead
+        ? "read:org is granted, so GitHub can recognise you as a member of reviewer teams."
+        : "read:org is missing, so GitHub may not recognise you as a member of reviewer teams."),
+      ...(orgRead ? [] : [grantLabel]),
+    );
+    if (action === grantLabel) await grantOrgReadAccess();
   });
   const openActionCenter = vscode.commands.registerCommand("actiondeck.openActionCenter", async () => {
     const targetId = statusTicker.primaryRepositoryId() ?? selectedContext?.id;
@@ -1780,6 +1965,8 @@ export function registerDashboardCommands(
     ...(workflowFilesWatcher ? [workflowFilesWatcher] : []),
     sessionChange,
     statusTicker,
+    { dispose: () => diagnostics?.dispose() },
+    showGitHubAccess,
     new vscode.Disposable(() => {
       for (const monitor of monitors.values()) monitor.dispose();
       monitors.clear();
@@ -1793,6 +1980,20 @@ export function registerDashboardCommands(
     getPlanStore: () => planStore,
     getPlanService: () => planService,
   };
+}
+
+/**
+ * Plans the dashboard can show. A stored plan that no longer matches the schema (for example written by
+ * another version) is left out and logged, so one plan cannot make the whole dashboard fail to load.
+ */
+function displayablePlans(plans: readonly ReleasePlan[]): ReleasePlan[] {
+  return plans.filter((plan) => {
+    const parsed = dashboardPlanSchema.safeParse(plan);
+    if (!parsed.success) {
+      console.warn(`ActionDeck skipped release plan "${plan.id}" that it could not display`, parsed.error.issues);
+    }
+    return parsed.success;
+  });
 }
 
 function historyResponse(history: MergedHistory, fromCache: boolean) {

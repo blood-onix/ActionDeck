@@ -47,6 +47,36 @@ describe("step log boundaries", () => {
     }
   });
 
+  it("splits steps that share a second at the runner's step marker and ignores skipped steps", () => {
+    const jobSteps = [
+      { number: 1, conclusion: "success", startedAt: "2026-11-24T13:41:20Z", completedAt: "2026-11-24T13:41:21Z" },
+      { number: 2, conclusion: "skipped", startedAt: "2026-11-24T13:41:21Z", completedAt: "2026-11-24T13:41:21Z" },
+      { number: 3, conclusion: "success", startedAt: "2026-11-24T13:41:21Z", completedAt: "2026-11-24T13:41:49Z" },
+      { number: 4, conclusion: "success", startedAt: "2026-11-24T13:41:49Z", completedAt: "2026-11-24T13:41:51Z" },
+      { number: 5, conclusion: "success", startedAt: "2026-11-24T13:41:51Z", completedAt: "2026-11-24T13:41:51Z" },
+    ];
+    const jobLog = [
+      "2026-11-24T13:41:20.1000000Z ##[group]Run ./prepare",
+      "2026-11-24T13:41:21.2000000Z prepared",
+      "2026-11-24T13:41:21.4000000Z ##[group]Run terraform plan",
+      "2026-11-24T13:41:47.0000000Z Plan: 0 to add, 0 to change, 1 to destroy.",
+      "2026-11-24T13:41:49.1000000Z Releasing state lock.",
+      "2026-11-24T13:41:49.3000000Z Prepare all required actions",
+      "2026-11-24T13:41:49.4000000Z ##[group]Run ./.github/actions/summarize-plan",
+      "2026-11-24T13:41:50.0000000Z | delete (1) | example-resource |",
+      "2026-11-24T13:41:51.1000000Z ##[group]Run rm -f .terraformrc",
+      "2026-11-24T13:41:51.2000000Z cleaned",
+    ].join("\n");
+
+    const plan = locateStepLog(jobLog, jobSteps, 3);
+    expect(plan).toEqual({ state: "identified", text: jobLog.split("\n").slice(2, 5).join("\n") });
+    const examine = locateStepLog(jobLog, jobSteps, 4);
+    expect(examine).toEqual({ state: "identified", text: jobLog.split("\n").slice(5, 8).join("\n") });
+    const cleanup = locateStepLog(jobLog, jobSteps, 5);
+    expect(cleanup).toEqual({ state: "identified", text: jobLog.split("\n").slice(8).join("\n") });
+    expect(locateStepLog(jobLog, jobSteps, 1)).toEqual({ state: "identified", text: jobLog.split("\n").slice(0, 2).join("\n") });
+  });
+
   it("does not invent boundaries for running, overlapping, untimestamped, or truncated logs", () => {
     expect(locateStepLog(log, steps, 3).state).toBe("unidentified");
     expect(locateStepLog(log, [

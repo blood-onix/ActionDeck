@@ -264,7 +264,8 @@ export function registerCopilotReadTools(
       throw new AppError("invalid_input", "The requested repositoryId does not match the active repository.");
     }
     const plans = planStore.list(repoContext.id).filter((p) =>
-      p.state === "waiting_approval" || p.state === "blocked_uncertain" || p.state === "missed_schedule",
+      p.state === "waiting_approval" || p.state === "blocked_uncertain" || p.state === "missed_schedule" ||
+      (p.state === "on_hold" && p.hold?.kind === "confirm"),
     );
     const session = await getGitHubSession(false);
     let pendingApprovalsState: "available" | "authentication_required" | "unavailable" = "available";

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { workflowAvailability } from "../domain/models/workflow";
 import { columnLayoutSchema } from "./preferences";
+import { MAX_WAIT_BEFORE_MINUTES } from "../domain/models/release-plan";
 
 export const dashboardLoadPayload = z.object({}).strict();
 
@@ -44,6 +45,12 @@ const planStepSchema = z.object({
   sensitiveInputKeys: z.array(z.string().max(256)).max(100),
   reEntryRequiredKeys: z.array(z.string().max(256)).max(100).optional(),
   gate: z.enum(["on_success", "on_any_completion", "stop_on_non_success"]),
+  parallelWithPrevious: z.boolean().optional(),
+  waitBeforeMinutes: z.number().int().min(0).max(MAX_WAIT_BEFORE_MINUTES).optional(),
+  confirmBefore: z.boolean().optional(),
+  autoApprove: z.object({
+    environments: z.array(z.string().max(255)).max(50).nullable(),
+  }).strict().optional(),
   state: z.enum([
     "pending", "dispatching", "request_accepted", "running", "waiting_approval",
     "completed", "failed", "stopped", "outcome_uncertain",
@@ -61,7 +68,7 @@ export const dashboardPlanSchema = z.object({
   name: z.string().max(256),
   repositoryId: z.string().max(1_024),
   state: z.enum([
-    "draft", "scheduled", "running", "waiting_approval", "paused",
+    "draft", "scheduled", "running", "waiting_approval", "on_hold", "paused",
     "completed", "stopped", "blocked_uncertain", "missed_schedule",
   ]),
   steps: z.array(planStepSchema).max(100),
@@ -72,6 +79,10 @@ export const dashboardPlanSchema = z.object({
     delayMs: z.number().optional(),
     timeZone: z.string().max(128),
   }).strict().optional(),
+  hold: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("wait"), untilMs: z.number() }).strict(),
+    z.object({ kind: z.literal("confirm") }).strict(),
+  ]).optional(),
   blockedReason: z.string().max(2_048).optional(),
   updatedAt: z.number(),
 }).strict();
@@ -95,7 +106,8 @@ export const approvalAuditSchema = z.object({
   environmentId: z.number().int().nonnegative(),
   environmentName: z.string().max(256),
   ruleId: z.string().max(128),
-  status: z.enum(["succeeded", "failed", "outcome_uncertain"]),
+  status: z.enum(["succeeded", "failed", "outcome_uncertain", "skipped"]),
+  error: z.string().max(1_000).optional(),
 }).strict();
 
 export const dashboardDataSchema = z.object({
@@ -117,6 +129,8 @@ export const dashboardDataSchema = z.object({
   /** Custom group names set from the dashboard; listed so the Group picker can offer them even when empty. */
   customGroups: z.array(z.string().max(128)).max(1_000).optional(),
   columnLayout: columnLayoutSchema.optional(),
+  /** Default auto-refresh interval for an open, active run, in seconds; 0 means off. */
+  runRefreshSeconds: z.number().int().min(0).max(3_600).optional(),
   /** Set when the data is a cached snapshot; the view shows it and revalidates in the background. */
   cachedAt: z.number().int().nonnegative().optional(),
 }).strict();
