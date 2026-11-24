@@ -5,14 +5,17 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  root: resolve(__dirname),
+  root: resolve(import.meta.dirname),
   base: "./",
   build: {
     outDir: "dist",
     emptyOutDir: true,
     assetsDir: "assets",
-    rollupOptions: {
-      input: resolve(__dirname, "index.html"),
+    // The webview ships as a single bundle read from disk by VS Code, so
+    // splitting it would add requests without making anything load sooner.
+    chunkSizeWarningLimit: 1024,
+    rolldownOptions: {
+      input: resolve(import.meta.dirname, "index.html"),
       onwarn(warning, defaultHandler) {
         // zod ships /** @__PURE__ */-style comments Rollup can't place; the comments are safely dropped.
         if (warning.code === "INVALID_ANNOTATION" && warning.id?.includes("/node_modules/zod/")) {

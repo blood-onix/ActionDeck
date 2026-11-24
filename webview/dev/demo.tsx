@@ -1,6 +1,6 @@
 // Browser-only demo harness used to capture README screenshots.
 // Every repository, workflow, branch and user name below is invented. Keep it that way.
-// Run: npx vite --config webview/vite.config.ts, then open
+// Run: npx vite --config webview/vite.config.mts, then open
 //   /dev/demo.html?view=dashboard|plans|pipeline|run|companion|action-center&theme=deck|light
 import React from "react";
 import { createRoot } from "react-dom/client";

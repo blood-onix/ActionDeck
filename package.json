@@ -722,7 +722,7 @@
     }
   },
   "scripts": {
-    "compile": "npm run typecheck && node esbuild.mjs && vite build --config webview/vite.config.ts",
+    "compile": "npm run typecheck && node esbuild.mjs && vite build --config webview/vite.config.mts",
     "vscode:prepublish": "npm run compile",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p webview/tsconfig.json --noEmit",
     "test": "vitest run",
@@ -757,7 +757,7 @@
     "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.28.2",
     "jsdom": "^31.0.1",
-    "ovsx": "^0.10.12",
+    "ovsx": "^1.4.0",
     "tailwindcss": "^4.0.12",
     "typescript": "^5.7.3",
     "vite": "^8.3.8",
@@ -769,7 +769,8 @@
     "minimatch": "^11.0.8"
   },
   "allowScripts": {
-    "esbuild@0.25.12": true,
-    "fsevents@2.3.3": true
+    "esbuild": true,
+    "fsevents": true,
+    "@vscode/vsce-sign": false
   }
 }
