@@ -96,6 +96,10 @@ function fallbackExplanations(plan: ReleasePlan): string[] {
       return ["The current run is waiting for a deployment approval, which is not treated as step completion."];
     case "missed_schedule":
       return ["The scheduled start time passed while the Extension Host was inactive; an explicit decision is required."];
+    case "on_hold":
+      return [plan.hold?.kind === "wait"
+        ? "The plan is waiting the delay set before its next step."
+        : "The plan is waiting for you to continue before its next step."];
     case "stopped":
       return ["The plan stopped because a step did not satisfy its gate or the plan was stopped manually."];
     case "paused":
@@ -108,13 +112,15 @@ function fallbackExplanations(plan: ReleasePlan): string[] {
 function fallbackNextSteps(plan: ReleasePlan): string[] {
   switch (plan.state) {
     case "blocked_uncertain":
-      return ["Inspect recent runs for the workflow in the Run Inspector and decide whether to resume or stop the plan."];
+      return ["Inspect recent runs for the workflow in the Run Inspector. If the step did not run, click Retry; otherwise stop the plan."];
     case "waiting_approval":
       return ["Open the Action Center and review the pending deployment environments."];
     case "missed_schedule":
       return ["Resume the plan to start it now or stop it to discard the missed schedule."];
+    case "on_hold":
+      return ["Click Continue (or Start now during a wait) to start the next step, or stop the plan."];
     case "stopped":
-      return ["Inspect the failed step's run and create a new plan if the release should continue."];
+      return ["Inspect the failed step's run, then click Retry to run the failed or stopped steps again and continue the plan."];
     case "paused":
       return ["Re-enter any sensitive inputs and resume the plan when the repository and identity are correct."];
     default:

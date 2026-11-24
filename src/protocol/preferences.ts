@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RUN_REFRESH_OPTIONS } from "../domain/models/settings";
 
 /** Table columns the user can show, hide, reorder and resize. Select, Workflow and Actions are always shown. */
 export const configurableColumnIds = [
@@ -23,6 +24,10 @@ export const columnLayoutSchema = z.object({
   widths: z.partialRecord(resizableColumnId, z.number().int().min(48).max(1_200)),
 }).strict();
 export type ColumnLayout = z.infer<typeof columnLayoutSchema>;
+
+export const runRefreshSavePayload = z.object({
+  seconds: z.union(RUN_REFRESH_OPTIONS.map((value) => z.literal(value)) as unknown as [z.ZodLiteral<number>, z.ZodLiteral<number>, ...z.ZodLiteral<number>[]]),
+}).strict();
 
 export const columnLayoutSavePayload = z.object({ layout: columnLayoutSchema }).strict();
 

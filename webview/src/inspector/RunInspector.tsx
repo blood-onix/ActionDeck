@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getWebviewState, setWebviewState, type Bridge } from "../bridge";
 import { parseSupportedGitHubRunUrl } from "../../../src/domain/services/external-links";
 import { RunActions } from "./RunActions";
+import { PendingApprovals } from "./PendingApprovals";
 import { StatusLabel } from "../components/StatusLabel";
 import { JobTree, type JobTreeJob } from "../components/JobTree";
 import { LogViewer, parseLogLines } from "../components/LogViewer";
@@ -16,6 +17,7 @@ import { formatDurationMs } from "../utils/health-metrics";
 import { formatRelativeTime } from "../../../src/domain/services/relative-time";
 import { isSensitiveInputName } from "../../../src/domain/services/plan-transitions";
 import type { WorkflowRunRecord } from "../../../src/domain/models/run";
+import { DEFAULT_RUN_REFRESH_SECONDS, normalizeRunRefreshSeconds, RUN_REFRESH_OPTIONS } from "../../../src/domain/models/settings";
 
 interface InspectedRun {
   runId: number;
@@ -75,6 +77,16 @@ interface LogExcerpt {
 }
 
 const READABLE_LOG_STATES = new Set(["loaded", "truncated"]);
+// While a run is active the inspector refreshes itself at the chosen interval (actiondeck.runRefreshInterval
+// by default). Hidden panels and finished runs are never refreshed.
+function refreshLabel(seconds: number): string {
+  return seconds === 0 ? "Auto-refresh off" : `Refresh every ${seconds}s`;
+}
+
+function selectionStatus(run: InspectedRun, jobId: number, stepNumber?: number): string | undefined {
+  const job = run.jobs.find((candidate) => candidate.id === jobId);
+  return stepNumber === undefined ? job?.status : job?.steps.find((step) => step.number === stepNumber)?.status;
+}
 
 function isFailed(value: { conclusion: string | null }): boolean {
   return value.conclusion === "failure" || value.conclusion === "timed_out";
@@ -91,6 +103,7 @@ type InvestigationSummary = FailureExplanationSummary;
 export function RunInspector({
   bridge,
   runId,
+  defaultRefreshSeconds = DEFAULT_RUN_REFRESH_SECONDS,
   workflowId,
   refName,
   autoAction,
@@ -100,6 +113,8 @@ export function RunInspector({
 }: {
   bridge: Bridge;
   runId: number;
+  /** Auto-refresh interval in seconds from the actiondeck.runRefreshInterval setting; 0 means off. */
+  defaultRefreshSeconds?: number;
   workflowId?: number;
   refName?: string;
   autoAction?: "explain" | "investigate";
@@ -108,6 +123,8 @@ export function RunInspector({
   onRunWithSameInputs?(values: { ref?: string; inputs?: ReadonlyArray<{ name: string; value: string }> }): void;
 }) {
   const [inspection, setInspection] = useState<InspectedRun>();
+  const [savedDefaultSeconds, setSavedDefaultSeconds] = useState(() => normalizeRunRefreshSeconds(defaultRefreshSeconds));
+  const [refreshSeconds, setRefreshSeconds] = useState<number>(savedDefaultSeconds);
   const [log, setLog] = useState<LogExcerpt>();
   const [logLoading, setLogLoading] = useState(false);
   const [stepsExpanded, setStepsExpanded] = useState(false);
@@ -188,6 +205,78 @@ export function RunInspector({
       logController.current?.abort();
     };
   }, [runId]);
+
+  const selection = useRef<{ jobId?: number; stepNumber?: number }>({});
+  selection.current = {
+    ...(selectedJobId === undefined ? {} : { jobId: selectedJobId }),
+    ...(selectedStepNumber === undefined ? {} : { stepNumber: selectedStepNumber }),
+  };
+
+  // Background refresh only replaces the run's status, jobs and steps. It never interrupts a log the user
+  // is reading; the selected log is reloaded once, when its job or step finishes.
+  const latestInspection = useRef<InspectedRun | undefined>(undefined);
+  latestInspection.current = inspection;
+  const refreshKey = inspection && inspection.status !== "completed" && refreshSeconds > 0
+    ? `${inspection.runId}:${inspection.attempt}:${inspection.status}:${refreshSeconds}`
+    : undefined;
+  useEffect(() => {
+    if (!refreshKey || !latestInspection.current) return;
+    const delay = refreshSeconds * 1_000;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
+    const schedule = () => {
+      if (!cancelled) timer = setTimeout(tick, delay);
+    };
+    const refresh = async () => {
+      const shown = latestInspection.current;
+      if (!shown || inFlight) return;
+      inFlight = true;
+      const generation = inspectionGeneration.current;
+      try {
+        const next = await bridge.request<InspectedRun>("run.inspect", { runId: shown.runId, attempt: shown.attempt });
+        if (cancelled) return;
+        // A manual refresh or attempt switch in the meantime wins; the loop just carries on.
+        if (generation === inspectionGeneration.current) {
+          latestInspection.current = next;
+          setInspection(next);
+          const { jobId, stepNumber } = selection.current;
+          if (
+            jobId !== undefined &&
+            selectionStatus(shown, jobId, stepNumber) !== "completed" &&
+            selectionStatus(next, jobId, stepNumber) === "completed"
+          ) {
+            void loadLog(jobId, stepNumber, next);
+          }
+        }
+      } catch {
+        // A failed refresh is retried on the next tick; the manual refresh button reports errors.
+      } finally {
+        inFlight = false;
+      }
+      // A status change re-runs this effect (and cancels this loop); otherwise keep going at the same pace.
+      schedule();
+    };
+    const tick = () => {
+      if (document.visibilityState === "hidden") {
+        schedule();
+        return;
+      }
+      void refresh();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      clearTimeout(timer);
+      void refresh();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refreshKey]);
 
   async function loadLog(jobId: number, stepNumber?: number, inspected = inspection) {
     if (!inspected) return;
@@ -427,6 +516,39 @@ export function RunInspector({
             </div>
 
             <div className="ad-inspector-actions">
+              {inspection.status !== "completed" ? (
+                <>
+                  <span className="ad-select ad-select--compact">
+                    <select
+                      aria-label="Auto-refresh interval"
+                      title="How often this run refreshes while it is active"
+                      value={refreshSeconds}
+                      onChange={(event) => setRefreshSeconds(Number(event.target.value))}
+                    >
+                      {RUN_REFRESH_OPTIONS.map((seconds) => (
+                        <option value={seconds} key={seconds}>
+                          {`${refreshLabel(seconds)}${seconds === savedDefaultSeconds ? " (default)" : ""}`}
+                        </option>
+                      ))}
+                    </select>
+                    <Icon name="chevron-down" size={12} />
+                  </span>
+                  {refreshSeconds !== savedDefaultSeconds ? (
+                    <Button
+                      variant="ghost"
+                      title="Use this interval for every run you open"
+                      onClick={() => {
+                        const seconds = normalizeRunRefreshSeconds(refreshSeconds);
+                        void bridge.request<{ seconds: number }>("preferences.saveRunRefresh", { seconds })
+                          .then(() => setSavedDefaultSeconds(seconds))
+                          .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+                      }}
+                    >
+                      Make default
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
               <span className="ad-select ad-select--compact">
                 <select
                   aria-label="Run attempt"
@@ -516,6 +638,20 @@ export function RunInspector({
                 ))}
               </dl>
             </details>
+          ) : null}
+
+          {inspection.attempt === inspection.attemptCount ? (
+            <PendingApprovals
+              bridge={bridge}
+              runId={inspection.runId}
+              workflowName={inspection.title}
+              status={inspection.status}
+              htmlUrl={inspection.htmlUrl}
+              onReviewed={() => {
+                void inspect(inspection.attempt, true);
+                onActionComplete?.();
+              }}
+            />
           ) : null}
 
           <div

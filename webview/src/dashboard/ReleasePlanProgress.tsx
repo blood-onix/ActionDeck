@@ -8,6 +8,8 @@ import { ScheduleNotice } from "../components/ScheduleNotice";
 import { StateNotice } from "../components/StateNotice";
 import { StatusLabel } from "../components/StatusLabel";
 import { normalizeStatus } from "../utils/status";
+import { EDITABLE_PLAN_STATES } from "../../../src/domain/models/release-plan";
+import { planStepConnectors } from "../utils/plan-connectors";
 
 interface PlanExplanation {
   mode: "model" | "fallback";
@@ -77,6 +79,7 @@ export function ReleasePlanProgress({
   onInspectRun,
   onOpenWorkflow,
   onDismiss,
+  onEdit,
 }: {
   bridge: Bridge;
   plan: ReleasePlan;
@@ -88,6 +91,8 @@ export function ReleasePlanProgress({
   onOpenWorkflow?(workflowPath: string): void;
   /** Hides a finished plan from the deck. */
   onDismiss?(): void;
+  /** Opens the plan in the editor; offered only while the plan has not started. */
+  onEdit?(plan: ReleasePlan): void;
 }) {
   const [reEntryInputs, setReEntryInputs] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -112,13 +117,16 @@ export function ReleasePlanProgress({
     }
   }
 
-  async function control(operation: "plan.start" | "plan.pause" | "plan.resume" | "plan.stop") {
+  async function control(
+    operation: "plan.start" | "plan.pause" | "plan.resume" | "plan.stop" | "plan.continue" | "plan.retry",
+  ) {
     setBusy(true);
     setError("");
     try {
       const updated = await bridge.request<ReleasePlan>(operation, {
         planId: plan.id,
-        ...(operation === "plan.start" || operation === "plan.resume"
+        ...(operation === "plan.start" || operation === "plan.resume" || operation === "plan.continue" ||
+          operation === "plan.retry"
           ? { runtimeInputs: reEntryInputs }
           : {}),
       });
@@ -130,14 +138,15 @@ export function ReleasePlanProgress({
     }
   }
 
-  const stepItems: PlanStepItem[] = plan.steps.map((step) => ({
+  const connectors = planStepConnectors(plan.steps);
+  const stepItems: PlanStepItem[] = plan.steps.map((step, index) => ({
     name: step.workflowPath.split("/").pop() ?? step.workflowPath,
     workflow: step.workflowPath,
     ref: step.ref,
     status: normalizeStatus(step.state, step.conclusion ?? null),
-    gate: step.gate === "on_any_completion" ? "on_any" : "on_success",
+    ...connectors[index],
     pauseBefore: (step.reEntryRequiredKeys?.length ?? 0) > 0,
-    ...(step.conclusion ? { note: step.conclusion } : {}),
+    ...(step.conclusion ? { note: step.conclusion } : step.error && step.state === "failed" ? { note: step.error } : {}),
     ...(step.runId !== undefined ? { runId: step.runId } : {}),
     ...(step.runId !== undefined && onInspectRun
       ? { onOpen: () => onInspectRun(step.runId!), openLabel: `Open run #${step.runId}` }
@@ -148,6 +157,11 @@ export function ReleasePlanProgress({
       ? { actions: <CancelStepRun key={step.runId} bridge={bridge} runId={step.runId} /> }
       : {}),
   }));
+
+  // Retry needs something to dispatch again: a failed, uncertain or stopped step that has not run since.
+  const canRetry = (plan.state === "stopped" || plan.state === "blocked_uncertain") &&
+    plan.steps.some((step, index) => index >= plan.currentStepIndex &&
+      (step.state === "failed" || step.state === "outcome_uncertain" || step.state === "stopped"));
 
   const scheduleAtLabel = plan.schedule
     ? `${new Date(plan.schedule.runAtMs).toLocaleString()} (${plan.schedule.timeZone})`
@@ -163,6 +177,11 @@ export function ReleasePlanProgress({
         <strong>{plan.name}</strong>
         <StatusLabel status={normalizeStatus(plan.state)} />
         <span className="ad-toolbar__spacer" />
+        {onEdit && EDITABLE_PLAN_STATES.has(plan.state) ? (
+          <Button variant="secondary" icon="edit" disabled={busy} onClick={() => onEdit(plan)}>
+            Edit plan
+          </Button>
+        ) : null}
         {(plan.state === "draft" || plan.state === "scheduled") ? (
           <Button variant="primary" icon="play" busy={busy} onClick={() => void control("plan.start")}>
             Start plan
@@ -178,9 +197,34 @@ export function ReleasePlanProgress({
             Resume plan
           </Button>
         ) : null}
+        {plan.state === "on_hold" ? (
+          <Button
+            variant="primary"
+            icon="play"
+            busy={busy}
+            title={plan.hold?.kind === "wait" ? "Skip the rest of the wait and start the next step now" : undefined}
+            onClick={() => void control("plan.continue")}
+          >
+            {plan.hold?.kind === "wait" ? "Start now" : "Continue"}
+          </Button>
+        ) : null}
+        {canRetry ? (
+          <Button
+            variant="primary"
+            icon="refresh"
+            busy={busy}
+            title={plan.state === "blocked_uncertain"
+              ? "Dispatch the uncertain steps again and continue. Check GitHub first: if a step did run, it would run twice."
+              : "Dispatch the failed or stopped steps again and continue the plan"}
+            onClick={() => void control("plan.retry")}
+          >
+            Retry
+          </Button>
+        ) : null}
         {(plan.state === "running" ||
           plan.state === "paused" ||
           plan.state === "waiting_approval" ||
+          plan.state === "on_hold" ||
           plan.state === "missed_schedule") ? (
           <Button
             variant="secondary"
@@ -230,6 +274,12 @@ export function ReleasePlanProgress({
         <div style={{ marginBottom: "var(--space-4)" }}>
           <ScheduleNotice state="scheduled" at={scheduleAtLabel} />
         </div>
+      ) : plan.state === "on_hold" ? (
+        <p className="ad-caption" role="status" style={{ marginBottom: "var(--space-4)" }}>
+          {plan.hold?.kind === "wait"
+            ? `Waiting until ${new Date(plan.hold.untilMs).toLocaleTimeString()} before step ${plan.currentStepIndex + 1}. Keep VS Code open; if it closes, the plan asks you to continue instead.`
+            : `Waiting for you to continue before step ${plan.currentStepIndex + 1}.`}
+        </p>
       ) : null}
 
       <PlanSteps steps={stepItems} />

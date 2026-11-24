@@ -2,6 +2,7 @@ export interface WorkflowRunRecord {
   readonly id: number;
   readonly workflowId?: number;
   readonly workflowPath?: string;
+  readonly workflowName?: string;
   readonly attemptCount: number;
   readonly hydration: "summary";
   readonly displayTitle: string;

@@ -159,6 +159,13 @@ export async function loadJobLogProjection(
   if (!step) {
     return withMessage(boundLogExcerpt(job.id, job.attempt, raw), notes);
   }
+  if (step.conclusion === "skipped") {
+    return {
+      ...boundLogExcerpt(job.id, job.attempt, "", undefined, step.number),
+      stepBoundary: "identified",
+      message: "This step was skipped, so it wrote no log.",
+    };
+  }
   const located = locateStepLog(raw, job.steps, step.number);
   if (located.state === "identified") {
     return {

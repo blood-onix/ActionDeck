@@ -2,6 +2,7 @@ import React, { useId } from "react";
 import type { WorkflowEnvironmentRef } from "../../../src/domain/models/dispatch";
 import { resolveAutoApprovalScope } from "../../../src/domain/services/auto-approval-scope";
 import { Banner } from "./Banner";
+import { Button } from "./Button";
 
 /**
  * One-run opt-in to auto-approve the deployment gates of the run being dispatched. Renders nothing when
@@ -13,6 +14,8 @@ export function AutoApproveConsent({
   checked,
   disabled = false,
   label = "this run",
+  orgReadAccess,
+  onGrantOrgAccess,
   onChange,
 }: {
   environments: readonly WorkflowEnvironmentRef[] | undefined;
@@ -20,6 +23,9 @@ export function AutoApproveConsent({
   checked: boolean;
   disabled?: boolean;
   label?: string;
+  /** False when the GitHub token cannot read team membership; undefined when unknown. */
+  orgReadAccess?: boolean | undefined;
+  onGrantOrgAccess?: (() => void) | undefined;
   onChange(checked: boolean): void;
 }): React.JSX.Element | null {
   const id = useId();
@@ -50,6 +56,19 @@ export function AutoApproveConsent({
           This skips the human review those environments require. It applies to the one run started here and
           never to later runs. GitHub still refuses the approval if the environment has Prevent self-review
           turned on or you are not one of its reviewers. Keep VS Code open until the run reaches the gate.
+        </Banner>
+      ) : null}
+      {checked && orgReadAccess === false ? (
+        <Banner tone="warning" title="Team reviewers may not be recognised">
+          ActionDeck's GitHub sign-in lacks the read:org scope. If a team must review these environments, GitHub
+          can report that you cannot approve them even though you are a member, and the auto-approval will not
+          run. You will be notified if that happens.
+          {onGrantOrgAccess ? (
+            <>
+              {" "}
+              <Button variant="secondary" onClick={onGrantOrgAccess}>Grant team access (read:org)</Button>
+            </>
+          ) : null}
         </Banner>
       ) : null}
     </div>

@@ -4,6 +4,7 @@ export interface RunNotification {
   readonly id: string;
   readonly repositoryId: string;
   readonly workflowId: number;
+  readonly workflowName?: string;
   readonly runId: number;
   readonly attempt: number;
   readonly title: string;

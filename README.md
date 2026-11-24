@@ -9,7 +9,7 @@ ActionDeck brings your repository's CI/CD into the editor. See every workflow at
 ## Highlights
 
 - **Repository dashboard**: every workflow in one table with status, pass rate, duration and recent history.
-- **Release plans**: chain workflows into a gated sequence such as build → staging → production, then run it now or schedule it.
+- **Release plans**: chain workflows into gated stages such as build → staging → production, run independent workflows side by side, then start the plan now or schedule it.
 - **Approvals in the editor**: review pending deployments and set optional auto-approval rules for your own runs.
 - **Validated dispatch**: inputs are loaded from the exact branch or tag you pick and checked before anything runs.
 - **Fast failure triage**: open a run and land on the failing step and error line, then compare it with the last successful run.
@@ -41,13 +41,20 @@ Choose a branch or tag and ActionDeck loads that ref's `workflow_dispatch` input
 
 ### Release plans
 
-Save a sequence of workflow runs as a reusable plan, with a gate between each step: continue on success, continue on any result, or stop on failure. Run a plan immediately or schedule it. Plans persist across VS Code restarts, and you can stop remaining steps at any time.
+Save a set of workflow runs as a reusable plan and run it now or on a schedule. Plans persist across VS Code restarts.
+
+- **Steps in order or together.** Each step starts after the step above, or together with it. Steps that start together are dispatched at once, and the plan moves on when all of them have finished.
+- **A rule for every step.** Choose whether the plan continues only if a step succeeds, or whatever its result.
+- **Waits and check-ins.** Wait a number of minutes before a step, ask for your go-ahead before it, or both. During a wait you can start the step early with **Start now**.
+- **Edit before it starts.** Change a draft or scheduled plan's steps, inputs and schedule with **Edit plan**.
+- **Recover from a failure.** When a plan stops, **Retry** dispatches the failed or stopped steps again and carries on from there. Steps that already succeeded are not run again.
+- **Stop at any time.** **Stop future steps** prevents anything else from being dispatched; runs already in progress keep running.
 
 ![Two release plans: one waiting for production approval, one scheduled](media/screenshots/plans.png)
 
 ### Action Center
 
-Everything waiting on you in one place: deployments pending approval, blocked plans and your auto-approval rules. Auto-approval is off by default and only ever applies to runs you started. The Action Center also gives read-only views of environments, variables, secret names and self-hosted runners.
+Everything waiting on you in one place: deployments pending approval, blocked plans and your auto-approval rules. When a deployment waits for you, the notification's **Review Run** opens that run with its jobs and logs next to Approve / Reject, so you can check what it is about to do first. Auto-approval is off by default and only ever applies to runs you started. The Action Center also gives read-only views of environments, variables, secret names and self-hosted runners.
 
 ![Action Center with a release plan waiting for approval and an auto-approval rule](media/screenshots/action-center.png)
 
@@ -62,6 +69,7 @@ ActionDeck uses **VS Code's native GitHub authentication**, the same sign-in VS 
 - **Nothing is stored by ActionDeck.** Your session is managed entirely by VS Code. ActionDeck never saves, caches or exports your token or credentials.
 - **No tokens to paste.** You never create or enter a personal access token.
 - **Minimal permissions.** ActionDeck starts with the `read:user` scope and requests `repo` only when you open a private repository, after you confirm.
+- **Optional team access.** If an environment's required reviewer is a team, GitHub may need the `read:org` scope to recognise you as a reviewer. ActionDeck asks for it only when you click **Grant team access (read:org)**.
 - **No access to secret values.** ActionDeck never requests the `workflow` scope and cannot read secret values.
 - **No telemetry.** ActionDeck communicates only with the GitHub API, and with Copilot through VS Code if you use the optional AI features.
 
@@ -87,6 +95,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 | ActionDeck: Open Dashboard | Open the workflow dashboard. |
 | ActionDeck: Select Repository | Choose the repository or remote to work with. |
 | ActionDeck: Open Action Center | Show approvals, blocked plans and repository Actions settings. |
+| ActionDeck: Show GitHub Access | Show the GitHub account and token scopes ActionDeck uses, and grant `read:org` if it is missing. |
 | ActionDeck: Open Workflow Companion | Open the dispatch form for the current workflow file. |
 | ActionDeck: Open Latest Workflow Run | Open the most recent run of the current workflow. |
 | ActionDeck: Open Pipeline Overview | Show the pipeline overview for a workflow. |
@@ -98,15 +107,23 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 | Setting | Default | Description |
 |---|---|---|
+| `actiondeck.runRefreshInterval` | `30` | Seconds between refreshes of an open run while it is active: 5, 10, 15, 30, 45, 60, or 0 for off. Change it per run from the inspector, or click **Make default** there. |
 | `actiondeck.workflowFolderPrefixes` | `[]` | Filename prefixes used to group workflows that have no `@folder` comment. |
 | `actiondeck.ai.model` | `auto` | Language model used for **Explain failure** and **Explain blocked plan**. |
 
 ## Known limitations
 
 - **GitHub Enterprise Server** and **VS Code for the Web** (`vscode.dev`, `github.dev`) are not supported.
-- **Scheduled plans run only while VS Code is open.** If VS Code is closed at the scheduled time, the plan waits for you to resume or cancel it.
+- **Scheduled plans and waits run only while VS Code is open.** If VS Code is closed when a plan is due to start, the plan waits for you to resume or cancel it. If it is closed when a wait between steps ends, the plan asks you to continue instead of dispatching late.
+- **Steps that start together cannot run the same workflow on the same branch or tag**, because GitHub gives no way to tell those runs apart. Put the second one in a later step.
 - **Large logs** are displayed in segments of up to 2 MB or 10,000 lines. Open the run on GitHub to view the full log.
 - **Deployment approvals** follow your GitHub environment protection rules and cannot bypass them.
+
+## Use at your own risk
+
+ActionDeck acts on your behalf through the GitHub API: it can dispatch, cancel and re-run workflows, and approve or reject deployments, including automatically when you turn on auto-approval. Workflows you trigger can change real infrastructure. Review what you dispatch and approve, and only enable auto-approval for environments where skipping human review is acceptable.
+
+ActionDeck is provided "as is", without warranty of any kind, as stated in the [MIT License](LICENSE). The authors are not liable for any damage, outage or cost resulting from its use.
 
 ## Feedback
 

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { DispatchInputDefinition, WorkflowEnvironmentRef } from "../../../src/domain/models/dispatch";
-import type { PlanGate, ReleasePlan } from "../../../src/domain/models/release-plan";
+import { MAX_WAIT_BEFORE_MINUTES, type PlanGate, type ReleasePlan } from "../../../src/domain/models/release-plan";
 import { resolveAutoApprovalScope } from "../../../src/domain/services/auto-approval-scope";
 import { isSensitiveInputName } from "../../../src/domain/services/plan-transitions";
 import type { Bridge } from "../bridge";
@@ -61,6 +61,11 @@ interface EditableStep {
   definition: StepDefinition;
   autoApprove: boolean;
   sensitiveKeysText: string;
+  /** Starts together with the step above. */
+  parallelWithPrevious: boolean;
+  /** Minutes to wait before this step starts, as typed. */
+  waitText: string;
+  confirmBefore: boolean;
 }
 
 function definedValues(step: EditableStep): Record<string, string> {
@@ -96,6 +101,13 @@ function resolveSchedule(mode: ScheduleMode, delayMinutes: string, absoluteLocal
   return undefined;
 }
 
+/** `YYYY-MM-DDTHH:mm` in local time, the value a datetime-local input expects. */
+function toLocalInputValue(ms: number): string {
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function formatLocalTimestamp(runAtMs: number, timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long", timeZone }).format(new Date(runAtMs));
 }
@@ -106,6 +118,7 @@ export function ReleasePlanEditor({
   heading = "Release Plan Editor",
   initialName = "Release Plan",
   defaultScheduleMode = "none",
+  plan: existingPlan,
   onSaved,
   onClose,
 }: {
@@ -114,17 +127,40 @@ export function ReleasePlanEditor({
   heading?: string;
   initialName?: string;
   defaultScheduleMode?: ScheduleMode;
+  /** A saved plan that has not started yet; the editor opens with its steps and saves over it. */
+  plan?: ReleasePlan;
   onSaved(plan: ReleasePlan): void;
   onClose(): void;
 }) {
-  const [name, setName] = useState(initialName);
-  const [steps, setSteps] = useState<EditableStep[]>(() =>
-    workflows.map((w, idx) => ({
+  const nextRowId = useRef(1);
+  const [name, setName] = useState(existingPlan?.name ?? initialName);
+  const [steps, setSteps] = useState<EditableStep[]>(() => existingPlan
+    ? existingPlan.steps.map((step) => ({
+      id: step.id,
+      workflowId: step.workflowId,
+      workflowPath: step.workflowPath,
+      ref: step.ref,
+      // Plans from earlier builds may carry the retired gate, which always behaved like on_success.
+      gate: step.gate === "stop_on_non_success" ? "on_success" : step.gate,
+      parallelWithPrevious: Boolean(step.parallelWithPrevious),
+      waitText: step.waitBeforeMinutes ? String(step.waitBeforeMinutes) : "",
+      confirmBefore: Boolean(step.confirmBefore),
+      // Used only if the workflow definition cannot be read; otherwise the saved values seed the form.
+      inputs: Object.entries(step.inputs).map(([key, value]) => ({ rowId: nextRowId.current++, key, value })),
+      values: { ...step.inputs },
+      definition: { status: "loading", ref: step.ref },
+      autoApprove: Boolean(step.autoApprove),
+      sensitiveKeysText: step.sensitiveInputKeys.join(", "),
+    }))
+    : workflows.map((w, idx) => ({
       id: `step-${idx + 1}`,
       workflowId: w.workflowId,
       workflowPath: w.path,
       ref: w.defaultBranch ?? "main",
-      gate: "stop_on_non_success",
+      gate: "on_success",
+      parallelWithPrevious: false,
+      waitText: "",
+      confirmBefore: false,
       inputs: [],
       values: {},
       definition: { status: "loading", ref: w.defaultBranch ?? "main" },
@@ -134,10 +170,14 @@ export function ReleasePlanEditor({
   );
   const uid = useId();
   const branches = useRemoteBranches(bridge);
-  const nextRowId = useRef(1);
-  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>(defaultScheduleMode);
+  // A saved schedule reopens as its absolute start time, so editing never silently shifts it.
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>(
+    existingPlan ? (existingPlan.schedule ? "absolute" : "none") : defaultScheduleMode,
+  );
   const [delayMinutes, setDelayMinutes] = useState("");
-  const [absoluteLocal, setAbsoluteLocal] = useState("");
+  const [absoluteLocal, setAbsoluteLocal] = useState(
+    existingPlan?.schedule ? toLocalInputValue(existingPlan.schedule.runAtMs) : "",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -187,9 +227,14 @@ export function ReleasePlanEditor({
       };
     }
     // A newer load for another ref wins; drop results that arrive late.
+    // Values already in the form (typed, or saved in an edited plan) win over the workflow's defaults.
     patchStepById(stepId, (current) => (current.definition.ref !== ref
       ? {}
-      : { definition, values, ...(definition.status === "loaded" ? {} : { autoApprove: false }) }));
+      : {
+        definition,
+        values: { ...values, ...current.values },
+        ...(definition.status === "loaded" ? {} : { autoApprove: false }),
+      }));
   }
 
   useEffect(() => {
@@ -237,7 +282,7 @@ export function ReleasePlanEditor({
       if (steps.some((step) => step.definition.status === "loading")) {
         throw new Error("Workflow inputs are still loading.");
       }
-      const parsedSteps = steps.map((step) => {
+      const parsedSteps = steps.map((step, index) => {
         const inputs: Record<string, string> = {};
         if (step.definition.status === "loaded") {
           if (step.definition.ref !== step.ref) {
@@ -262,6 +307,14 @@ export function ReleasePlanEditor({
         if (Object.keys(inputs).length > MAX_INPUTS_PER_STEP) {
           throw new Error(`${step.workflowPath} supports at most ${MAX_INPUTS_PER_STEP} inputs.`);
         }
+        const startsStage = index > 0 && !step.parallelWithPrevious;
+        let waitBeforeMinutes = 0;
+        if (startsStage && step.waitText.trim() !== "") {
+          waitBeforeMinutes = Number(step.waitText);
+          if (!Number.isInteger(waitBeforeMinutes) || waitBeforeMinutes < 0 || waitBeforeMinutes > MAX_WAIT_BEFORE_MINUTES) {
+            throw new Error(`The wait before ${step.workflowPath} must be a whole number of minutes from 0 to ${MAX_WAIT_BEFORE_MINUTES}.`);
+          }
+        }
         const sensitiveInputKeys = step.sensitiveKeysText
           .split(",")
           .map((s) => s.trim())
@@ -274,6 +327,9 @@ export function ReleasePlanEditor({
           inputs,
           sensitiveInputKeys,
           gate: step.gate,
+          ...(index > 0 && step.parallelWithPrevious ? { parallelWithPrevious: true } : {}),
+          ...(waitBeforeMinutes > 0 ? { waitBeforeMinutes } : {}),
+          ...(startsStage && step.confirmBefore ? { confirmBefore: true } : {}),
           ...(step.autoApprove && step.definition.status === "loaded" && step.definition.environments?.length
             ? { autoApprove: { environments: resolveAutoApprovalScope(step.definition.environments, inputs).environments } }
             : {}),
@@ -293,7 +349,7 @@ export function ReleasePlanEditor({
       }
 
       const plan = await bridge.request<ReleasePlan>("plan.save", {
-        id: `plan-${Date.now()}`,
+        id: existingPlan?.id ?? `plan-${Date.now()}`,
         name: name.trim() || initialName,
         steps: parsedSteps,
         ...(schedule ? { schedule } : {}),
@@ -422,6 +478,28 @@ export function ReleasePlanEditor({
                   }}
                 />
               </div>
+              {index > 0 && (
+              <div className="ad-field">
+                <label className="ad-field__label" htmlFor={`${uid}-${step.id}-start`}><span>Starts</span></label>
+                <span className="ad-select">
+                  <select
+                    id={`${uid}-${step.id}-start`}
+                    aria-label={`Start of ${step.workflowPath}`}
+                    value={step.parallelWithPrevious ? "together" : "after"}
+                    onChange={(e) => updateStep(index, { parallelWithPrevious: e.target.value === "together" })}
+                  >
+                    <option value="after">After the step above</option>
+                    <option value="together">Together with the step above</option>
+                  </select>
+                  <Icon name="chevron-down" size={14} />
+                </span>
+                <span className="ad-field__help">
+                  {step.parallelWithPrevious
+                    ? "Both are dispatched at once; the plan moves on when all steps that start together have finished."
+                    : "Starts once the steps above have finished and their rules allow it."}
+                </span>
+              </div>
+              )}
               {steps.length > 1 && (
               <div className="ad-field">
                 <label className="ad-field__label" htmlFor={`${uid}-${step.id}-gate`}><span>When this step finishes</span></label>
@@ -432,16 +510,44 @@ export function ReleasePlanEditor({
                     value={step.gate}
                     onChange={(e) => updateStep(index, { gate: e.target.value as PlanGate })}
                   >
-                    <option value="stop_on_non_success">Stop on non-success</option>
-                    <option value="on_success">Continue on success only</option>
-                    <option value="on_any_completion">Continue on any completion</option>
+                    <option value="on_success">Continue only if it succeeds</option>
+                    <option value="on_any_completion">Continue whatever the result</option>
                   </select>
                   <Icon name="chevron-down" size={14} />
                 </span>
-                <span className="ad-field__help">Decides whether the next step starts after this one.</span>
+                <span className="ad-field__help">Decides whether the steps after this one start.</span>
               </div>
               )}
             </div>
+
+            {index > 0 && !step.parallelWithPrevious && (
+            <div className="ad-planedit__grid">
+              <div className="ad-field">
+                <label className="ad-field__label" htmlFor={`${uid}-${step.id}-wait`}><span>Wait before starting (minutes)</span></label>
+                <input
+                  id={`${uid}-${step.id}-wait`}
+                  className="ad-input"
+                  aria-label={`Wait before ${step.workflowPath} in minutes`}
+                  type="number"
+                  min={0}
+                  max={MAX_WAIT_BEFORE_MINUTES}
+                  placeholder="0"
+                  value={step.waitText}
+                  onChange={(e) => updateStep(index, { waitText: e.target.value })}
+                />
+                <span className="ad-field__help">Counted from when the steps above finish. Keep VS Code open while it waits.</span>
+              </div>
+              <label className="ad-check ad-planedit__check">
+                <input
+                  type="checkbox"
+                  aria-label={`Ask before starting ${step.workflowPath}`}
+                  checked={step.confirmBefore}
+                  onChange={(e) => updateStep(index, { confirmBefore: e.target.checked })}
+                />
+                <span>Ask me before starting this step</span>
+              </label>
+            </div>
+            )}
 
             <div className="ad-field">
               <label className="ad-field__label" htmlFor={`${uid}-${step.id}-sens`}><span>Sensitive input keys</span></label>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DeploymentReviewItemResult, PendingEnvironment } from "../../../src/domain/models/approval";
 import type { ReleasePlan } from "../../../src/domain/models/release-plan";
 import type { Bridge } from "../bridge";
@@ -9,6 +9,7 @@ import { PlanSteps } from "../components/PlanSteps";
 import { StateNotice } from "../components/StateNotice";
 import { Icon } from "../components/Icon";
 import { normalizeStatus } from "../utils/status";
+import { planStepConnectors } from "../utils/plan-connectors";
 
 export interface PendingRunInfo {
   runId: number;
@@ -35,6 +36,7 @@ const BLOCKED_PLAN_STATES: ReadonlySet<ReleasePlan["state"]> = new Set([
   "missed_schedule",
   "stopped",
   "waiting_approval",
+  "on_hold",
 ]);
 
 export function ActionCenter({
@@ -57,7 +59,12 @@ export function ActionCenter({
   onExplainBlocked?(plan: ReleasePlan): void;
   onClose?: () => void;
 }) {
-  const [selectedRunId, setSelectedRunId] = useState<number | undefined>(pendingRunIds[0]);
+  const [chosenRunId, setSelectedRunId] = useState<number | undefined>(pendingRunIds[0]);
+  // Pending runs often arrive after the drawer opens, so fall back to the first one instead of keeping
+  // an empty selection while the picker visibly shows a run.
+  const selectedRunId = chosenRunId !== undefined && pendingRunIds.includes(chosenRunId)
+    ? chosenRunId
+    : pendingRunIds[0];
   const [environmentsByRun, setEnvironmentsByRun] = useState<Record<number, PendingEnvironment[]>>({});
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [comment, setComment] = useState("");
@@ -112,6 +119,15 @@ export function ActionCenter({
     setBusy(false);
   }
 
+  // Show the approve/reject cards for the selected run right away, so a toast that lands here needs one click.
+  const autoLoadedRunId = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (selectedRunId === undefined || autoLoadedRunId.current === selectedRunId) return;
+    autoLoadedRunId.current = selectedRunId;
+    void loadRuns([selectedRunId]);
+    // loadRuns only reads the bridge, which is stable for the drawer's lifetime.
+  }, [selectedRunId]);
+
   async function submitReview(state: "approved" | "rejected", keys: readonly string[]) {
     const byRun = new Map<number, number[]>();
     for (const key of keys) {
@@ -124,13 +140,13 @@ export function ActionCenter({
     const outcomes: ReviewOutcome[] = [];
     for (const [runId, environmentIds] of byRun) {
       try {
-        const response = await bridge.request<DeploymentReviewItemResult[]>("deployment.review", {
+        const response = await bridge.request<{ results: DeploymentReviewItemResult[] }>("deployment.review", {
           runId,
           environmentIds,
           state,
           comment,
         });
-        outcomes.push(...response.map((item) => ({ runId, item })));
+        outcomes.push(...response.results.map((item) => ({ runId, item })));
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : String(reason);
         outcomes.push(
@@ -182,12 +198,12 @@ export function ActionCenter({
                     />
                   </div>
                   <PlanSteps
-                    steps={plan.steps.map((step) => ({
+                    steps={plan.steps.map((step, index) => ({
                       name: step.workflowPath.split("/").pop() ?? step.workflowPath,
                       workflow: step.workflowPath,
                       ref: step.ref,
                       status: normalizeStatus(step.state, step.conclusion ?? null),
-                      gate: step.gate === "on_any_completion" ? "on_any" : "on_success",
+                      ...planStepConnectors(plan.steps)[index],
                     }))}
                   />
                   {explanation ? (
@@ -244,7 +260,7 @@ export function ActionCenter({
             disabled={selectedRunId === undefined}
             onClick={() => void loadRuns(selectedRunId === undefined ? [] : [selectedRunId])}
           >
-            Load pending environments
+            {selectedRunId !== undefined && environmentsByRun[selectedRunId] ? "Refresh" : "Load pending environments"}
           </Button>
           {pendingRunIds.length > 1 ? (
             <Button variant="secondary" busy={busy} onClick={() => void loadRuns(pendingRunIds)}>

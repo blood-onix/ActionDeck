@@ -17,6 +17,7 @@ export type Status =
   | "paused"
   | "scheduled"
   | "missed_schedule"
+  | "on_hold"
   | "blocked";
 
 export interface StatusDescriptor {
@@ -61,6 +62,13 @@ export const STATUS_DESCRIPTORS: Record<Status, StatusDescriptor> = {
     label: "Queued",
     codicon: "circle-large-outline",
     tone: "muted",
+    spin: false,
+  },
+  on_hold: {
+    status: "on_hold",
+    label: "Waiting to Continue",
+    codicon: "watch",
+    tone: "warning",
     spin: false,
   },
   waiting_approval: {
@@ -172,6 +180,7 @@ const RAW_STATUS_MAP: Record<string, Status> = {
   paused: "paused",
   scheduled: "scheduled",
   missed_schedule: "missed_schedule",
+  on_hold: "on_hold",
   blocked: "blocked",
   blocked_uncertain: "blocked",
 };

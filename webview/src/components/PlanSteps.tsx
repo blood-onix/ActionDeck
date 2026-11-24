@@ -8,7 +8,14 @@ export interface PlanStepItem {
   workflow: string;
   ref?: string | undefined;
   status: Status | string;
+  /** Condition for starting this step, set by the gates of the steps before it. */
   gate?: "on_success" | "on_any" | undefined;
+  /** The gate refers to several parallel steps above. */
+  afterGroup?: boolean | undefined;
+  /** Starts at the same time as the step above. */
+  startsTogether?: boolean | undefined;
+  waitMinutes?: number | undefined;
+  confirmBefore?: boolean | undefined;
   pauseBefore?: boolean | undefined;
   note?: string | undefined;
   /** GitHub run started for this step, once dispatched. */
@@ -23,6 +30,13 @@ export interface PlanStepItem {
 export interface PlanStepsProps {
   steps: readonly PlanStepItem[];
   still?: boolean | undefined;
+}
+
+function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
 export function PlanSteps({ steps, still = false }: PlanStepsProps): React.JSX.Element {
@@ -49,13 +63,32 @@ export function PlanSteps({ steps, still = false }: PlanStepsProps): React.JSX.E
           {index > 0 ? (
             <li className="ad-plan__gate" aria-hidden="false">
               <span className="ad-plan__rail" aria-hidden="true" />
-              <span
-                className={`ad-gate ${step.gate === "on_any" ? "ad-gate--any" : ""}`}
-              >
-                {step.gate === "on_any"
-                  ? "Runs on any completion"
-                  : "Runs only on success"}
-              </span>
+              {step.startsTogether ? (
+                <span className="ad-gate ad-gate--parallel">
+                  <Icon name="split-horizontal" size={12} />
+                  <span>Starts together with the step above</span>
+                </span>
+              ) : (
+                <span
+                  className={`ad-gate ${step.gate === "on_any" ? "ad-gate--any" : ""}`}
+                >
+                  {step.gate === "on_any"
+                    ? step.afterGroup ? "Runs once all steps above finish" : "Runs whatever the result above"
+                    : step.afterGroup ? "Runs only if all steps above succeed" : "Runs only if the step above succeeds"}
+                </span>
+              )}
+              {step.waitMinutes ? (
+                <span className="ad-gate ad-gate--pause">
+                  <Icon name="watch" size={12} />
+                  <span>{`Waits ${formatMinutes(step.waitMinutes)} first`}</span>
+                </span>
+              ) : null}
+              {step.confirmBefore ? (
+                <span className="ad-gate ad-gate--pause">
+                  <Icon name="question" size={12} />
+                  <span>Asks before starting</span>
+                </span>
+              ) : null}
               {step.pauseBefore ? (
                 <span className="ad-gate ad-gate--pause">
                   <Icon name="debug-pause" size={12} />

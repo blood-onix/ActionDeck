@@ -252,13 +252,18 @@ const step = (id: string, workflowId: number, workflowPath: string, state: strin
 
 const plans = [
   {
-    id: "plan-weekly", name: "Weekly release v2.8.0", repositoryId: REPO_ID, state: "waiting_approval", currentStepIndex: 3,
+    id: "plan-weekly", name: "Weekly release v2.8.0", repositoryId: REPO_ID, state: "waiting_approval", currentStepIndex: 4,
     updatedAt: now - 9 * MIN,
     steps: [
       step("s1", 207, ".github/workflows/release.yml", "completed", { runId: 7_300_100_107, conclusion: "success" }),
       step("s2", 208, ".github/workflows/publish-docker.yml", "completed", { runId: 7_300_100_199, conclusion: "success" }),
-      step("s3", 204, ".github/workflows/deploy-staging.yml", "completed", { runId: 7_300_100_104, conclusion: "success" }),
-      step("s4", 205, ".github/workflows/deploy-production.yml", "waiting_approval", { runId: WAITING_RUN }),
+      step("s3", 206, ".github/workflows/preview-environments.yml", "completed", {
+        runId: 7_300_100_198, conclusion: "success", parallelWithPrevious: true,
+      }),
+      step("s4", 204, ".github/workflows/deploy-staging.yml", "completed", { runId: 7_300_100_104, conclusion: "success" }),
+      step("s5", 205, ".github/workflows/deploy-production.yml", "waiting_approval", {
+        runId: WAITING_RUN, waitBeforeMinutes: 15, confirmBefore: true,
+      }),
     ],
   },
   {
@@ -267,8 +272,9 @@ const plans = [
     schedule: { kind: "absolute", runAtMs: now + 5 * HOUR, timeZone: "UTC" },
     steps: [
       step("h1", 201, ".github/workflows/ci.yml", "pending"),
-      step("h2", 204, ".github/workflows/deploy-staging.yml", "pending"),
-      step("h3", 205, ".github/workflows/deploy-production.yml", "pending"),
+      step("h2", 202, ".github/workflows/e2e-tests.yml", "pending", { parallelWithPrevious: true }),
+      step("h3", 204, ".github/workflows/deploy-staging.yml", "pending", { gate: "on_any_completion" }),
+      step("h4", 205, ".github/workflows/deploy-production.yml", "pending", { confirmBefore: true }),
     ],
   },
 ];

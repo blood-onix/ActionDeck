@@ -41,7 +41,7 @@ interface HistoryResponse {
 }
 
 const MAX_HISTORY_PAGES = 5;
-const ACTIVE_PLAN_STATES = new Set(["scheduled", "running", "paused", "waiting_approval", "missed_schedule"]);
+const ACTIVE_PLAN_STATES = new Set(["scheduled", "running", "paused", "waiting_approval", "on_hold", "missed_schedule"]);
 
 /** One workflow in its own frame: recent runs, a dispatch form, and scheduling. */
 export function PipelineOverview({

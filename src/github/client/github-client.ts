@@ -127,6 +127,7 @@ export function mapRun(run: WorkflowRunResponse): WorkflowRunRecord {
     id: run.id,
     workflowId: run.workflow_id,
     ...(run.path ? { workflowPath: workflowPathFromRunPath(run.path) ?? run.path.replace(/@.*$/, "") } : {}),
+    ...(run.name ? { workflowName: run.name } : {}),
     attemptCount: run.run_attempt ?? 1,
     hydration: "summary",
     displayTitle: run.display_title,

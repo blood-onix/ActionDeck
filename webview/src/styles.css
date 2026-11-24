@@ -1540,7 +1540,7 @@ input[type="radio"] {
 .ad-gate {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   font-size: 11px;
   line-height: 14px;
   font-weight: 600;
@@ -1556,6 +1556,11 @@ input[type="radio"] {
 
 .ad-gate--pause {
   color: var(--ink);
+}
+
+.ad-gate--parallel {
+  color: var(--ink);
+  border-style: dotted;
 }
 
 /* Schedule */
@@ -2527,6 +2532,11 @@ body.vscode-high-contrast-light .ad-row--selected td {
   align-items: start;
 }
 
+/* Lines the checkbox up with the input beside it, which sits under a label. */
+.ad-planedit__check {
+  align-self: center;
+}
+
 .ad-planedit__section {
   margin: var(--space-2) 0 0;
 }
@@ -2948,6 +2958,16 @@ body.vscode-high-contrast-light .ad-row--selected td {
 }
 
 .ad-run-inputs > summary.ad-section { margin: 0; }
+
+.ad-run-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ad-run-approvals > .ad-section { margin: 0; }
 
 .ad-run-inputs > summary {
   cursor: pointer;

@@ -501,3 +501,107 @@ describe("run inspector Copilot actions", () => {
     expect(screen.getByText(/Excerpt truncated at the 10,000-line/)).toBeTruthy();
   });
 });
+
+describe("run inspector background refresh", () => {
+  const ACTIVE_RUN_REFRESH_MS = 10_000;
+  const WAITING_RUN_REFRESH_MS = 30_000;
+  const runAt = (status: string, stepStatus: string) => ({
+    runId: 77, attempt: 1, attemptCount: 1, dependencyResolution: "resolved",
+    title: "apply", status, conclusion: status === "completed" ? "success" : null,
+    htmlUrl: "https://github.com/acme/demo/actions/runs/77",
+    jobs: [{
+      id: 5, runId: 77, attempt: 1, name: "Apply", status, conclusion: status === "completed" ? "success" : null,
+      steps: [{ number: 3, name: "Terraform apply", status: stepStatus, conclusion: stepStatus === "completed" ? "success" : null }],
+    }],
+  });
+
+  it("refreshes an active run, reloads the selected log once it finishes, then stops", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let current = runAt("in_progress", "in_progress");
+      const request = vi.fn(async (operation: string) => operation === "run.inspect"
+        ? current
+        : { text: "apply log", truncated: false, availability: "loaded" });
+      render(<RunInspector bridge={{ request }} runId={77} defaultRefreshSeconds={10} onClose={() => undefined} />);
+      await screen.findAllByText("Terraform apply");
+      const inspectCalls = () => request.mock.calls.filter(([operation]) => operation === "run.inspect").length;
+      expect(inspectCalls()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(ACTIVE_RUN_REFRESH_MS);
+      await waitFor(() => expect(inspectCalls()).toBe(2));
+
+      fireEvent.click(screen.getAllByText("Terraform apply")[0]!);
+      const logCalls = () => request.mock.calls.filter(([operation]) => operation === "run.logs.load").length;
+      await waitFor(() => expect(logCalls()).toBeGreaterThan(0));
+      const logsBeforeFinish = logCalls();
+
+      current = runAt("completed", "completed");
+      await vi.advanceTimersByTimeAsync(ACTIVE_RUN_REFRESH_MS);
+      await waitFor(() => expect(logCalls()).toBe(logsBeforeFinish + 1));
+      const finalInspects = inspectCalls();
+
+      await vi.advanceTimersByTimeAsync(ACTIVE_RUN_REFRESH_MS * 3);
+      expect(inspectCalls()).toBe(finalInspects);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not refresh while the panel is hidden", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      const request = vi.fn(async (operation: string) => operation === "run.inspect"
+        ? runAt("waiting", "queued")
+        : { runId: 77, environments: [] });
+      render(<RunInspector bridge={{ request }} runId={77} onClose={() => undefined} />);
+      await screen.findAllByText("Terraform apply");
+      await vi.advanceTimersByTimeAsync(WAITING_RUN_REFRESH_MS * 3);
+      expect(request.mock.calls.filter(([operation]) => operation === "run.inspect")).toHaveLength(1);
+    } finally {
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("run inspector refresh interval", () => {
+  const waitingRun = {
+    runId: 88, attempt: 1, attemptCount: 1, dependencyResolution: "resolved",
+    title: "deploy", status: "in_progress", conclusion: null,
+    htmlUrl: "https://github.com/acme/demo/actions/runs/88",
+    jobs: [{ id: 9, runId: 88, attempt: 1, name: "Deploy", status: "in_progress", conclusion: null, steps: [] }],
+  };
+
+  it("uses the configured default, lets the user change it, and saves a new default", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const request = vi.fn(async (operation: string, payload?: { seconds?: number }) => {
+        if (operation === "run.inspect") return waitingRun;
+        if (operation === "preferences.saveRunRefresh") return { seconds: payload?.seconds };
+        return { text: "", truncated: false, availability: "loaded" };
+      });
+      render(<RunInspector bridge={{ request }} runId={88} defaultRefreshSeconds={45} onClose={() => undefined} />);
+      const select = await screen.findByLabelText("Auto-refresh interval") as HTMLSelectElement;
+      expect(select.value).toBe("45");
+      expect(screen.getByRole("option", { name: "Refresh every 45s (default)" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Make default" })).toBeNull();
+      const inspects = () => request.mock.calls.filter(([operation]) => operation === "run.inspect").length;
+
+      fireEvent.change(select, { target: { value: "5" } });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(inspects()).toBe(2));
+
+      fireEvent.click(screen.getByRole("button", { name: "Make default" }));
+      await waitFor(() => expect(request).toHaveBeenCalledWith("preferences.saveRunRefresh", { seconds: 5 }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Make default" })).toBeNull());
+
+      fireEvent.change(select, { target: { value: "0" } });
+      const afterOff = inspects();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(inspects()).toBe(afterOff);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

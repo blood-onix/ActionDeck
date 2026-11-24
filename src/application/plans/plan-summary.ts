@@ -12,7 +12,7 @@ export interface PlanStatusSummary {
   readonly pendingApprovals: number;
 }
 
-const ACTIVE_STATES: ReadonlySet<ReleasePlan["state"]> = new Set(["running", "waiting_approval"]);
+const ACTIVE_STATES: ReadonlySet<ReleasePlan["state"]> = new Set(["running", "waiting_approval", "on_hold"]);
 const BLOCKED_STATES: ReadonlySet<ReleasePlan["state"]> = new Set(["blocked_uncertain", "missed_schedule"]);
 
 export function summarizePlanStatus(statuses: Iterable<RepositoryPlanStatus>): PlanStatusSummary {

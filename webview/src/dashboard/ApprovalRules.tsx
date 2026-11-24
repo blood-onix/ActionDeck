@@ -8,6 +8,7 @@ export interface ApprovalAuditView {
   workflowId: number;
   environmentName: string;
   status: string;
+  error?: string;
 }
 
 export interface RuleWorkflowOption {
@@ -118,6 +119,7 @@ export function ApprovalRules({
               <li key={`${entry.timestamp}:${entry.runId}:${index}`}>
                 {new Date(entry.timestamp).toLocaleString()} · {workflowLabel(entry.workflowId)} · run #{entry.runId} ·{" "}
                 {entry.environmentName}: {entry.status}
+                {entry.error ? ` (${entry.error})` : ""}
               </li>
             ))}
           </ul>

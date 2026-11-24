@@ -30,9 +30,26 @@ describe("ActionCenter UI", () => {
     expect(screen.getByText(/1 awaiting approval/i)).toBeTruthy();
     expect(screen.getByText(/5 queued/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /Load pending environments/i }));
+    // The selected run's environments load on their own, so a toast that lands here needs no extra click.
     await screen.findByText(/staging/i);
     expect(screen.getByText(/Required reviewer missing/i)).toBeTruthy();
+  });
+});
+
+describe("ActionCenter pending runs that arrive after opening", () => {
+  it("selects and loads the first run instead of leaving the load button disabled", async () => {
+    const request = vi.fn().mockResolvedValue({
+      runId: 7,
+      environments: [{ environmentId: 3, environmentName: "dev", eligible: true, currentUserCanApprove: true, waitTimerRemainingSeconds: 0 }],
+    });
+    const bridge = { request } as unknown as Bridge;
+    const { rerender } = render(
+      <ActionCenter bridge={bridge} pendingRunIds={[]} queuedCount={0} approvalWaitCount={0} />,
+    );
+    rerender(<ActionCenter bridge={bridge} pendingRunIds={[7]} queuedCount={0} approvalWaitCount={1} />);
+    await screen.findByRole("button", { name: "Approve" });
+    expect(request).toHaveBeenCalledWith("deployment.list", { runId: 7 });
+    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
 
@@ -49,7 +66,7 @@ describe("ActionCenter review flows", () => {
   it("offers direct approve for a single environment and links to the run inspector", async () => {
     const request = vi.fn(async (operation: string) => operation === "deployment.list"
       ? { runId: 42, environments: [env(10, "staging")] }
-      : [{ environmentId: 10, status: "succeeded" }]);
+      : { results: [{ environmentId: 10, status: "succeeded" }] });
     const onInspectRun = vi.fn();
     render(
       <ActionCenter
@@ -62,7 +79,6 @@ describe("ActionCenter review flows", () => {
         onClose={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Load pending environments/i }));
     await screen.findByText(/Reviewers: alice/);
     fireEvent.click(screen.getAllByRole("button", { name: "Inspect run" })[0]!);
     expect(onInspectRun).toHaveBeenCalledWith(42);
@@ -74,7 +90,7 @@ describe("ActionCenter review flows", () => {
   it("requires explicit selection for multiple environments and reviews across runs", async () => {
     const request = vi.fn(async (operation: string, payload: { runId: number }) => operation === "deployment.list"
       ? { runId: payload.runId, environments: payload.runId === 1 ? [env(10, "staging"), env(11, "prod")] : [env(12, "staging")] }
-      : (payload as unknown as { environmentIds: number[] }).environmentIds.map((environmentId) => ({ environmentId, status: "succeeded" })));
+      : { results: (payload as unknown as { environmentIds: number[] }).environmentIds.map((environmentId) => ({ environmentId, status: "succeeded" })) });
     render(
       <ActionCenter
         bridge={{ request } as unknown as Bridge}
@@ -84,8 +100,10 @@ describe("ActionCenter review flows", () => {
         onClose={() => {}}
       />,
     );
+    // Wait for the first run's automatic load before asking for all of them.
+    await screen.findByLabelText("Select prod on run #1");
     fireEvent.click(screen.getByRole("button", { name: /Load all pending runs/i }));
-    await screen.findByLabelText("Select staging on run #1");
+    await screen.findByLabelText("Select staging on run #2");
     const boxes = screen.getAllByRole("checkbox");
     fireEvent.click(boxes[0]!);
     fireEvent.click(boxes[2]!);

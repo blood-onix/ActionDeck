@@ -26,7 +26,7 @@ import {
   subscriptionUpdatePayload,
 } from "./approvals";
 import { settingsCachedCardsPayload, settingsLoadCardPayload } from "./settings";
-import { columnLayoutSavePayload, workflowSetGroupPayload } from "./preferences";
+import { columnLayoutSavePayload, runRefreshSavePayload, workflowSetGroupPayload } from "./preferences";
 import { viewOpenInTabPayload } from "./dashboard";
 
 export const MAX_MESSAGE_BYTES = 64 * 1024;
@@ -41,6 +41,11 @@ export const requestSchema = z.discriminatedUnion("operation", [
   z.object({
     ...requestBase,
     operation: z.literal("repository.select"),
+    payload: z.object({}).strict(),
+  }).strict(),
+  z.object({
+    ...requestBase,
+    operation: z.literal("auth.grantOrgAccess"),
     payload: z.object({}).strict(),
   }).strict(),
   z.object({
@@ -159,6 +164,16 @@ export const requestSchema = z.discriminatedUnion("operation", [
   }).strict(),
   z.object({
     ...requestBase,
+    operation: z.literal("plan.continue"),
+    payload: planControlPayload,
+  }).strict(),
+  z.object({
+    ...requestBase,
+    operation: z.literal("plan.retry"),
+    payload: planControlPayload,
+  }).strict(),
+  z.object({
+    ...requestBase,
     operation: z.literal("plan.stop"),
     payload: planControlPayload,
   }).strict(),
@@ -206,6 +221,11 @@ export const requestSchema = z.discriminatedUnion("operation", [
     ...requestBase,
     operation: z.literal("dashboard.saveColumns"),
     payload: columnLayoutSavePayload,
+  }).strict(),
+  z.object({
+    ...requestBase,
+    operation: z.literal("preferences.saveRunRefresh"),
+    payload: runRefreshSavePayload,
   }).strict(),
   z.object({
     ...requestBase,
