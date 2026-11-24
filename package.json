@@ -53,14 +53,6 @@
     "devops"
   ],
   "activationEvents": [
-    "onCommand:actiondeck.openDashboard",
-    "onCommand:actiondeck.selectRepository",
-    "onCommand:actiondeck.openActionCenter",
-    "onCommand:actiondeck.openCompanion",
-    "onCommand:actiondeck.openLatestWorkflowRun",
-    "onCommand:actiondeck.openPipeline",
-    "onCommand:actiondeck.searchPipelines",
-    "onView:actiondeck.launcher",
     "workspaceContains:.github/workflows/*.{yml,yaml}",
     "onLanguage:yaml",
     "onLanguage:github-actions-workflow"
@@ -164,7 +156,6 @@
         "modelDescription": "List workflows and recent summary metadata for the explicitly selected ActionDeck repository.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId"
           ],
@@ -191,7 +182,6 @@
         "modelDescription": "Inspect attempt-specific run, job, and step metadata for the selected repository.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "runId",
@@ -220,7 +210,6 @@
         "modelDescription": "Read a bounded, redacted plain-text log excerpt (at most 200 lines) for a specific job or step.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "workflowId",
@@ -272,7 +261,6 @@
         "modelDescription": "Retrieve workflow YAML source at an investigated commit revision or ref as untrusted evidence.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "workflowId"
@@ -310,7 +298,6 @@
         "modelDescription": "Read and validate remote workflow_dispatch input definitions on a ref without submitting.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "workflowId",
@@ -339,7 +326,6 @@
         "modelDescription": "Inspect a persisted repository-bound release plan and why progression is blocked.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "planId"
@@ -360,7 +346,6 @@
         "modelDescription": "Summarize blocked release plans and pending approval items for the active repository.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId"
           ],
@@ -377,7 +362,6 @@
         "modelDescription": "Dispatch a remote workflow on a ref after explicit user confirmation.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "workflowId",
@@ -406,7 +390,6 @@
         "modelDescription": "Cancel an active run or rerun failed jobs after explicit user confirmation.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "action",
@@ -441,7 +424,6 @@
         "modelDescription": "Approve or reject explicit pending deployment environments after user confirmation.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "runId",
@@ -482,7 +464,6 @@
         "modelDescription": "Confirm starting a persisted sequential release plan.",
         "inputSchema": {
           "type": "object",
-          "additionalProperties": false,
           "required": [
             "repositoryId",
             "planId"
@@ -669,7 +650,8 @@
       "actiondeck": [
         {
           "id": "actiondeck.launcher",
-          "name": "Workflows"
+          "name": "Workflows",
+          "icon": "media/01-stacked-deck-mono.svg"
         }
       ]
     },
