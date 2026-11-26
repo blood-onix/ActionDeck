@@ -83,6 +83,7 @@ import {
 import { watchWorkflowFiles } from "../providers/workflow-file-watcher";
 import { createDashboardPanel } from "../webviews/panel-factory";
 import { dashboardPanelKey } from "../webviews/panel-key";
+import { PanelIdentityRegistry } from "../webviews/panel-identity";
 import { selectRepository } from "./repository-commands";
 import { DispatchInputHistory } from "../../application/dispatch/dispatch-input-history";
 import { currentWorkspaceBranch, discoverWorkspaceRepositories } from "../providers/workspace-repositories";
@@ -128,8 +129,8 @@ export function registerDashboardCommands(
 ): DashboardRuntime {
   let selectedContext: RepositoryContext | undefined;
   let selectedSession: vscode.AuthenticationSession | undefined;
-  let identityGeneration = 0;
-  const panelSessionRefreshers = new Map<string, Set<(retriggerDashboard?: boolean) => void>>();
+  // Open tabs per repository; only a change of that repository's GitHub account locks them.
+  const panelIdentities = new PanelIdentityRegistry<vscode.AuthenticationSession>();
   /** Open dashboards listening for plan changes made in the background (monitor, scheduler). */
   const planObservers = new Set<(plan: ReleasePlan) => void>();
   /** Open dashboards listening for runs seen by a repository's background poll, keyed by repository id. */
@@ -372,7 +373,6 @@ export function registerDashboardCommands(
     if (selectedContext) scheduler.invalidate(selectedContext.id);
     selectedContext = target;
     selectedSession = session;
-    identityGeneration++;
     return true;
   };
 
@@ -456,7 +456,6 @@ export function registerDashboardCommands(
     if (previousId && selectedContext?.id !== previousId) {
       scheduler.invalidate(previousId);
     }
-    if (previousId !== selectedContext?.id) identityGeneration++;
     selectedSession = await getGitHubSession(false);
     if (selectedContext && selectedSession) {
       ensureBackgroundMonitor(selectedContext, selectedSession);
@@ -494,7 +493,8 @@ export function registerDashboardCommands(
     const activeContext = selectedContext;
     const activeSession = selectedSession;
     let panelSession = activeSession;
-    let activeGeneration = identityGeneration;
+    // Set once the account this tab was opened with is signed out or replaced; the tab is then reopened, never revived.
+    let identityRevoked = false;
     let lastLoadHadInventoryOrHistoryFailure = false;
     const folder = (vscode.workspace.workspaceFolders ?? []).find((item) => item.uri.toString() === activeContext.workspaceFolderUri);
     if (!folder) {
@@ -531,13 +531,13 @@ export function registerDashboardCommands(
       dashboardLease,
     );
     const assertActiveIdentity = () => {
-      if (identityGeneration !== activeGeneration) {
+      if (identityRevoked) {
         dispatchReviews.clear();
-        throw new AppError("authentication_required", "GitHub identity or repository selection changed. Reopen the dashboard.");
+        throw new AppError("authentication_required", "You signed in to GitHub with a different account. Reopen the dashboard.");
       }
     };
     const propagateElevatedSession = (elevated: vscode.AuthenticationSession, retriggerIfFailed: boolean) => {
-      if (identityGeneration !== activeGeneration || elevated.account.id !== activeContext.authenticatedUserId) {
+      if (identityRevoked || elevated.account.id !== activeContext.authenticatedUserId) {
         throw new AppError("authentication_required", "GitHub identity changed. Reopen the dashboard to continue.");
       }
       panelSession = elevated;
@@ -545,7 +545,7 @@ export function registerDashboardCommands(
       monitors.get(activeContext.id)?.updateToken(elevated.accessToken);
       scheduler.invalidate(activeContext.id);
       if (retriggerIfFailed && lastLoadHadInventoryOrHistoryFailure) {
-        for (const refresh of panelSessionRefreshers.get(activeContext.id) ?? []) refresh(true);
+        panelIdentities.refresh(activeContext.id, elevated, true);
       }
     };
     const elevateOnDemand = <T>(
@@ -1468,7 +1468,6 @@ export function registerDashboardCommands(
         if (next) {
           selectedContext = next;
           if (previousId && previousId !== next.id) scheduler.invalidate(previousId);
-          if (previousId !== next.id) identityGeneration++;
           selectedSession = await getGitHubSession(false);
         }
         return { selected: Boolean(next) };
@@ -1503,12 +1502,14 @@ export function registerDashboardCommands(
       : workflowFile && initialAction === "pipeline" ? `Pipeline · ${workflowFile}`
       : workflowFile ? `Companion · ${workflowFile}`
       : "ActionDeck";
-    const refreshPanelSession = (retriggerDashboard = lastLoadHadInventoryOrHistoryFailure) => {
-      const session = selectedSession;
-      if (!session || session.account.id !== activeContext.authenticatedUserId) return;
+    const refreshPanelSession = (
+      session: vscode.AuthenticationSession,
+      retriggerDashboard = lastLoadHadInventoryOrHistoryFailure,
+    ) => {
+      if (identityRevoked || session.account.id !== activeContext.authenticatedUserId) return;
+      const tokenChanged = session.accessToken !== panelSession.accessToken;
       panelSession = session;
-      activeGeneration = identityGeneration;
-      dispatchReviews.clear();
+      if (tokenChanged) dispatchReviews.clear();
       if (!retriggerDashboard) return;
       void Promise.resolve(panel.webview.postMessage(hostEvent(randomUUID(), "repository.session.changed", {
         repository: { owner: activeContext.owner, repo: activeContext.repo },
@@ -1516,20 +1517,26 @@ export function registerDashboardCommands(
         if (!delivered) console.warn("ActionDeck could not deliver a refreshed session event.");
       }).catch((error: unknown) => console.error("ActionDeck session refresh failed", error));
     };
-    const refreshers = panelSessionRefreshers.get(activeContext.id) ?? new Set();
-    refreshers.add(refreshPanelSession);
-    panelSessionRefreshers.set(activeContext.id, refreshers);
+    const unregisterIdentity = panelIdentities.register(activeContext.id, {
+      refresh: refreshPanelSession,
+      revoke: () => {
+        identityRevoked = true;
+        dispatchReviews.clear();
+        // A locked tab must not be revealed again; the next open creates a fresh one.
+        if (openPanels.get(panelKey) === panel) openPanels.delete(panelKey);
+      },
+    });
     const postPanelEvent = (event: string, payload: unknown) => {
       void Promise.resolve(panel.webview.postMessage(hostEvent(randomUUID(), event, payload)))
         .catch((error: unknown) => console.error(`ActionDeck could not deliver ${event}`, error));
     };
     const observePlan = (plan: ReleasePlan) => {
-      if (plan.repositoryId !== activeContext.id || identityGeneration !== activeGeneration) return;
+      if (plan.repositoryId !== activeContext.id || identityRevoked) return;
       postPanelEvent("plan.updated", { plan });
     };
     planObservers.add(observePlan);
     const observeRuns = (runs: readonly WorkflowRunRecord[]) => {
-      if (identityGeneration !== activeGeneration) return;
+      if (identityRevoked) return;
       const patches = latestRunPatches(activeContext, runs);
       if (patches.length === 0) return;
       postPanelEvent("runs.observed", {
@@ -1546,7 +1553,7 @@ export function registerDashboardCommands(
     let localChangesPending = false;
     let previewChangesPending = false;
     const sendLocalChange = () => {
-      if (identityGeneration !== activeGeneration) return;
+      if (identityRevoked) return;
       localChangesPending = true;
       if (!panel.visible) return;
       localChangesPending = false;
@@ -1558,7 +1565,7 @@ export function registerDashboardCommands(
     };
     const localWorkflowChanges = watchWorkflowFiles(localWorkflowWatcher, sendLocalChange);
     const sendPreviewChange = () => {
-      if (identityGeneration !== activeGeneration) return;
+      if (identityRevoked) return;
       previewChangesPending = true;
       if (!panel.visible) return;
       previewChangesPending = false;
@@ -1575,7 +1582,7 @@ export function registerDashboardCommands(
           documentPath.toLowerCase() !== workflowPath.toLowerCase() ||
           event.document.uri.scheme !== folder.uri.scheme ||
           event.document.uri.authority !== folder.uri.authority ||
-          identityGeneration !== activeGeneration
+          identityRevoked
         ) return;
         sendPreviewChange();
       })
@@ -1591,8 +1598,7 @@ export function registerDashboardCommands(
       localWorkflowChanges.dispose();
       editorChanges?.dispose();
       viewState.dispose();
-      refreshers.delete(refreshPanelSession);
-      if (refreshers.size === 0) panelSessionRefreshers.delete(activeContext.id);
+      unregisterIdentity();
       planObservers.delete(observePlan);
       panelRunObservers.delete(observeRuns);
       if (panelRunObservers.size === 0) runObservers.delete(activeContext.id);
@@ -1647,7 +1653,6 @@ export function registerDashboardCommands(
     selectedContext = next;
     selectedSession = session;
     if (previousId && previousId !== next.id) scheduler.invalidate(previousId);
-    if (previousId !== next.id) identityGeneration++;
     return true;
   };
   const openWorkflowFromEditor = async (
@@ -1694,7 +1699,6 @@ export function registerDashboardCommands(
         }
         selectedContext = next;
         if (previousId && selectedContext.id !== previousId) scheduler.invalidate(previousId);
-        if (selectedContext.id !== previousId) identityGeneration++;
         selectedSession = await getGitHubSession(false);
       }
     }
@@ -1936,20 +1940,16 @@ export function registerDashboardCommands(
         void autoApprovalService.haltAllOnIdentityChange(bound.id);
         void runApprovalGrants.revokeAll(bound.id);
         boundContexts.delete(bound.id);
+        panelIdentities.revoke(bound.id);
         if (isSelected) {
-          identityGeneration++;
           selectedContext = undefined;
           selectedSession = undefined;
         }
       } else {
         monitors.get(bound.id)?.updateToken(currentSession.accessToken);
-        if (isSelected) {
-          const tokenChanged = currentSession.accessToken !== selectedSession?.accessToken;
-          selectedSession = currentSession;
-          if (tokenChanged) {
-            for (const refresh of panelSessionRefreshers.get(bound.id) ?? []) refresh();
-          }
-        }
+        if (isSelected) selectedSession = currentSession;
+        // Every tab of this repository, selected or not, keeps working with the renewed session.
+        panelIdentities.refresh(bound.id, currentSession);
       }
     }
   });

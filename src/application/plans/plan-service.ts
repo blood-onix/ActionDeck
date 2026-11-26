@@ -217,7 +217,7 @@ export class ReleasePlanService {
         void this.savePlan({
           ...withoutHold(plan),
           state: "paused",
-          blockedReason: "Paused because GitHub identity or repository selection changed.",
+          blockedReason: "Paused because the GitHub account changed.",
         });
       }
     }
