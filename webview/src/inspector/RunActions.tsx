@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Bridge } from "../bridge";
 import { Button } from "../components/Button";
 
-type RunAction = "cancel" | "rerun_failed_jobs";
+type RunAction = "cancel" | "rerun_failed_jobs" | "rerun_all";
 type RunActionResult =
   | { state: "accepted" }
   | { state: "outcome_uncertain"; reconciliation: "not_observed" | "unavailable" };
@@ -28,9 +28,9 @@ export function RunActions({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const canCancel = ["queued", "in_progress", "waiting", "pending"].includes(status);
-  const canRerun =
-    status === "completed" &&
-    ["failure", "timed_out", "startup_failure"].includes(conclusion ?? "");
+  const isCompleted = status === "completed";
+  const canRerunFailed =
+    isCompleted && ["failure", "timed_out", "startup_failure"].includes(conclusion ?? "");
 
   async function submit(action: RunAction) {
     setBusy(true);
@@ -55,7 +55,7 @@ export function RunActions({
     }
   }
 
-  if (!canCancel && !canRerun) return null;
+  if (!canCancel && !isCompleted) return null;
   return (
     <div className="ad-drawer__actions" aria-label="Run actions">
       {canCancel ? (
@@ -69,16 +69,27 @@ export function RunActions({
           {`Cancel run #${runId}`}
         </Button>
       ) : null}
-      {canRerun ? (
+      {isCompleted ? (
         <>
+          {canRerunFailed ? (
+            <Button
+              variant="secondary"
+              icon="refresh"
+              busy={busy}
+              title={`Rerun failed jobs for run #${runId} attempt ${attempt}`}
+              onClick={() => void submit("rerun_failed_jobs")}
+            >
+              Re-run failed jobs
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
-            icon="refresh"
+            icon="debug-restart"
             busy={busy}
-            title={`Rerun failed jobs for run #${runId} attempt ${attempt}`}
-            onClick={() => void submit("rerun_failed_jobs")}
+            title={`Rerun all jobs for run #${runId} attempt ${attempt}`}
+            onClick={() => void submit("rerun_all")}
           >
-            Re-run failed jobs
+            Re-run all jobs
           </Button>
           {onRunWithSameInputs ? (
             <Button variant="secondary" icon="copy" onClick={onRunWithSameInputs}>

@@ -19,13 +19,14 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
         }),
         cancelWorkflowRun: vi.fn().mockResolvedValue({ status: 202 }),
         reRunWorkflowFailedJobs: vi.fn().mockResolvedValue({ status: 201 }),
+        reRunWorkflow: vi.fn().mockResolvedValue({ status: 201 }),
         ...overrides,
       },
     },
   };
 }
 
-function authorize(action: "cancel" | "rerun_failed_jobs", runId = 8, attempt = 2) {
+function authorize(action: "cancel" | "rerun_failed_jobs" | "rerun_all", runId = 8, attempt = 2) {
   const authorization = new UiAuthorization();
   authorization.authorize({
     repositoryId: repository.id,
@@ -59,6 +60,35 @@ describe("manual run actions", () => {
       attempt: 2,
     })).rejects.toMatchObject({ code: "permission_restricted" });
     expect(client.rest.actions.reRunWorkflowFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it("reruns all jobs of a successful completed run", async () => {
+    const client = fakeClient({
+      getWorkflowRun: vi.fn().mockResolvedValue({
+        data: { id: 8, run_attempt: 2, status: "completed", conclusion: "success" },
+      }),
+    });
+    await expect(executeRunAction(client, repository, authorize("rerun_all"), {
+      action: "rerun_all",
+      runId: 8,
+      attempt: 2,
+    })).resolves.toEqual({ state: "accepted" });
+    expect(client.rest.actions.reRunWorkflow).toHaveBeenCalledWith({ owner: "acme", repo: "demo", run_id: 8 });
+    expect(client.rest.actions.reRunWorkflowFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it("refuses to rerun all jobs of a run that has not completed", async () => {
+    const client = fakeClient({
+      getWorkflowRun: vi.fn().mockResolvedValue({
+        data: { id: 8, run_attempt: 2, status: "in_progress", conclusion: null },
+      }),
+    });
+    await expect(executeRunAction(client, repository, authorize("rerun_all"), {
+      action: "rerun_all",
+      runId: 8,
+      attempt: 2,
+    })).rejects.toMatchObject({ code: "invalid_input" });
+    expect(client.rest.actions.reRunWorkflow).not.toHaveBeenCalled();
   });
 
   it("revalidates the live attempt before invoking the authorized mutation", async () => {

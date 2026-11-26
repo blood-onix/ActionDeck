@@ -10,7 +10,7 @@ First public release.
 ### Added
 
 - **Dashboard**: pick a repository, see local and remote workflows side by side, group them into virtual folders (`# @folder:` comments or name prefixes), and track run metrics.
-- **Run inspection**: per-attempt jobs, steps and logs (each log segment capped at 2 MB or 10,000 lines), with cancel and re-run controls.
+- **Run inspection**: per-attempt jobs, steps and logs (each log segment capped at 2 MB or 10,000 lines), with cancel, re-run failed jobs, and re-run all jobs (also on successful runs) controls. Opening a tab that is already open switches to it instead of opening a duplicate.
 - **Pipeline drawer**: click a workflow to see its pipeline. Double-click, Cmd/Ctrl+click or "Open in a tab" opens it in its own editor tab.
 - **Workflow Companion**: local YAML diagnostics, CodeLens and editor-title actions, validated `workflow_dispatch` runs against remote refs, and batch dispatch of several workflows.
 - **Release plans**: saved release plans per repository, with steps that run in order or together, a continue rule per step, optional waits and confirmations before a step, editing before the plan starts, retry after a failure, recovery after a crash or reload, and local scheduling while VS Code is running.

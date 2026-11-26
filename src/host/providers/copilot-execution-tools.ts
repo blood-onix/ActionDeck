@@ -103,7 +103,7 @@ export function registerCopilotExecutionTools(
 
   register("actiondeck_run_action", async (input: {
     repositoryId: string;
-    action: "cancel" | "rerun_failed_jobs";
+    action: "cancel" | "rerun_failed_jobs" | "rerun_all";
     runId: number;
     attempt: number;
   }, signal) => {

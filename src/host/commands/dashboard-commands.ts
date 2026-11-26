@@ -82,6 +82,7 @@ import {
 } from "../providers/github-authentication";
 import { watchWorkflowFiles } from "../providers/workflow-file-watcher";
 import { createDashboardPanel } from "../webviews/panel-factory";
+import { dashboardPanelKey } from "../webviews/panel-key";
 import { selectRepository } from "./repository-commands";
 import { DispatchInputHistory } from "../../application/dispatch/dispatch-input-history";
 import { currentWorkspaceBranch, discoverWorkspaceRepositories } from "../providers/workspace-repositories";
@@ -153,6 +154,8 @@ export function registerDashboardCommands(
   // One monitor and one immutable context per repository keeps plans bound to the repository that created them.
   const monitors = new Map<string, BackgroundMonitor>();
   const boundContexts = new Map<string, RepositoryContext>();
+  // Open tabs keyed by repository and the surface they show, so an entry point reveals its tab instead of duplicating it.
+  const openPanels = new Map<string, vscode.WebviewPanel>();
   let diagnostics: vscode.OutputChannel | undefined;
   /** Writes why a gate was not approvable, so a wrong account or a missing scope is visible. */
   const logIneligibleGate = (
@@ -482,6 +485,12 @@ export function registerDashboardCommands(
     }
     if (!selectedContext || !selectedSession) return;
     ensureBackgroundMonitor(selectedContext, selectedSession);
+    const panelKey = dashboardPanelKey(selectedContext.id, selectedContext.authenticatedUserId, { initialRunId, initialView, initialAction, workflowPath });
+    const existingPanel = openPanels.get(panelKey);
+    if (existingPanel) {
+      existingPanel.reveal(existingPanel.viewColumn);
+      return;
+    }
     const activeContext = selectedContext;
     const activeSession = selectedSession;
     let panelSession = activeSession;
@@ -1486,6 +1495,7 @@ export function registerDashboardCommands(
       },
     }, workflowPath && initialAction !== "pipeline" ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active);
     // Each entry point opens its own tab; name it after the surface it shows.
+    openPanels.set(panelKey, panel);
     const workflowFile = workflowPath ? posix.basename(workflowPath) : undefined;
     panel.title = initialRunId ? `Run #${initialRunId}`
       : initialView === "action-center" ? "Action Center"
@@ -1576,6 +1586,7 @@ export function registerDashboardCommands(
       if (event.webviewPanel.visible && previewChangesPending) sendPreviewChange();
     });
     const disposal = panel.onDidDispose(() => {
+      if (openPanels.get(panelKey) === panel) openPanels.delete(panelKey);
       dashboardLease.dispose();
       localWorkflowChanges.dispose();
       editorChanges?.dispose();
@@ -2026,4 +2037,3 @@ function readWorkflowGroups(repoState: RepositoryState): Record<string, string> 
   const parsed = workflowGroupsSchema.safeParse(repoState.get("workflowGroups"));
   return parsed.success ? parsed.data : {};
 }
-

@@ -21,6 +21,7 @@ describe("run inspection protocol", () => {
   it("allows only exact cancel or rerun-failed target identities", () => {
     expect(runActionPayload.safeParse({ action: "cancel", runId: 7, attempt: 2 }).success).toBe(true);
     expect(runActionPayload.safeParse({ action: "rerun_failed_jobs", runId: 7, attempt: 2 }).success).toBe(true);
+    expect(runActionPayload.safeParse({ action: "rerun_all", runId: 7, attempt: 2 }).success).toBe(true);
     expect(runActionPayload.safeParse({ action: "approve", runId: 7, attempt: 2 }).success).toBe(false);
     expect(runActionPayload.safeParse({ action: "cancel", runId: 7, attempt: 2, ref: "main" }).success).toBe(false);
   });

@@ -144,6 +144,11 @@ describe("Copilot execution target pre-validation", () => {
     const cancel = await resolveRunAction(context, { getRun: vi.fn().mockResolvedValue(run({ status: "in_progress", conclusion: null })) },
       { action: "cancel", runId: 9, attempt: 2 });
     expect(cancel.proposal.effectiveParameters).toMatchObject({ action: "cancel", runStatus: "in_progress" });
+    const rerunAll = await resolveRunAction(context, { getRun: vi.fn().mockResolvedValue(run({ conclusion: "success" })) },
+      { action: "rerun_all", runId: 9, attempt: 2 });
+    expect(rerunAll.reviewed.target).toBe("rerun_all:run:9:attempt:2");
+    await expect(resolveRunAction(context, { getRun: vi.fn().mockResolvedValue(run({ status: "in_progress", conclusion: null })) },
+      { action: "rerun_all", runId: 9, attempt: 2 })).rejects.toMatchObject({ code: "invalid_input" });
   });
 
   it("validates pending deployment environments and reviewer eligibility", async () => {
