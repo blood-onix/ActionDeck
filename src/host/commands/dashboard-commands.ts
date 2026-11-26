@@ -485,7 +485,7 @@ export function registerDashboardCommands(
     }
     if (!selectedContext || !selectedSession) return;
     ensureBackgroundMonitor(selectedContext, selectedSession);
-    const panelKey = dashboardPanelKey(selectedContext.id, { initialRunId, initialView, initialAction, workflowPath });
+    const panelKey = dashboardPanelKey(selectedContext.id, selectedContext.authenticatedUserId, { initialRunId, initialView, initialAction, workflowPath });
     const existingPanel = openPanels.get(panelKey);
     if (existingPanel) {
       existingPanel.reveal(existingPanel.viewColumn);

@@ -5,23 +5,27 @@ describe("dashboard panel key", () => {
   const repo = "acme/demo|origin|file:///repo";
 
   it("gives the same key to the same surface of the same repository", () => {
-    expect(dashboardPanelKey(repo, {})).toBe(dashboardPanelKey(repo, {}));
-    expect(dashboardPanelKey(repo, { initialRunId: 7 })).toBe(dashboardPanelKey(repo, { initialRunId: 7 }));
-    expect(dashboardPanelKey(repo, { workflowPath: ".github/workflows/CI.yml", initialAction: "pipeline" }))
-      .toBe(dashboardPanelKey(repo, { workflowPath: ".github/workflows/ci.yml", initialAction: "pipeline" }));
+    expect(dashboardPanelKey(repo, "1", {})).toBe(dashboardPanelKey(repo, "1", {}));
+    expect(dashboardPanelKey(repo, "1", { initialRunId: 7 })).toBe(dashboardPanelKey(repo, "1", { initialRunId: 7 }));
+    expect(dashboardPanelKey(repo, "1", { workflowPath: ".github/workflows/CI.yml", initialAction: "pipeline" }))
+      .toBe(dashboardPanelKey(repo, "1", { workflowPath: ".github/workflows/ci.yml", initialAction: "pipeline" }));
   });
 
   it("separates repositories and surfaces", () => {
     const keys = new Set([
-      dashboardPanelKey(repo, {}),
-      dashboardPanelKey("acme/other|origin|file:///other", {}),
-      dashboardPanelKey(repo, { initialRunId: 7 }),
-      dashboardPanelKey(repo, { initialRunId: 8 }),
-      dashboardPanelKey(repo, { initialView: "action-center" }),
-      dashboardPanelKey(repo, { workflowPath: ".github/workflows/ci.yml", initialAction: "companion" }),
-      dashboardPanelKey(repo, { workflowPath: ".github/workflows/ci.yml", initialAction: "pipeline" }),
-      dashboardPanelKey(repo, { workflowPath: ".github/workflows/ci.yml", initialAction: "latest-run" }),
+      dashboardPanelKey(repo, "1", {}),
+      dashboardPanelKey("acme/other|origin|file:///other", "1", {}),
+      dashboardPanelKey(repo, "1", { initialRunId: 7 }),
+      dashboardPanelKey(repo, "1", { initialRunId: 8 }),
+      dashboardPanelKey(repo, "1", { initialView: "action-center" }),
+      dashboardPanelKey(repo, "1", { workflowPath: ".github/workflows/ci.yml", initialAction: "companion" }),
+      dashboardPanelKey(repo, "1", { workflowPath: ".github/workflows/ci.yml", initialAction: "pipeline" }),
+      dashboardPanelKey(repo, "1", { workflowPath: ".github/workflows/ci.yml", initialAction: "latest-run" }),
     ]);
     expect(keys.size).toBe(8);
+  });
+
+  it("does not reuse a tab bound to a different GitHub identity", () => {
+    expect(dashboardPanelKey(repo, "1", {})).not.toBe(dashboardPanelKey(repo, "2", {}));
   });
 });
