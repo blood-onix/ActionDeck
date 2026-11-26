@@ -13,7 +13,7 @@ export const runLogsPayload = z.object({
 }).strict();
 
 export const runActionPayload = z.object({
-  action: z.enum(["cancel", "rerun_failed_jobs"]),
+  action: z.enum(["cancel", "rerun_failed_jobs", "rerun_all"]),
   runId: z.number().int().positive(),
   attempt: z.number().int().positive(),
 }).strict();

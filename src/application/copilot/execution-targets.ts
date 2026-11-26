@@ -75,7 +75,7 @@ export async function resolveRunAction(
   context: RepositoryContext,
   port: RunStatePort,
   request: {
-    readonly action: "cancel" | "rerun_failed_jobs";
+    readonly action: "cancel" | "rerun_failed_jobs" | "rerun_all";
     readonly runId: number;
     readonly attempt: number;
   },
@@ -94,6 +94,9 @@ export async function resolveRunAction(
     (status !== "completed" || !RERUNNABLE_CONCLUSIONS.has(run.conclusion ?? ""))
   ) {
     throw new AppError("invalid_input", "Failed jobs can be rerun only for a completed run that failed, timed out, or failed to start.");
+  }
+  if (request.action === "rerun_all" && status !== "completed") {
+    throw new AppError("invalid_input", "All jobs can be rerun only after the run completes.");
   }
   return {
     proposal: {

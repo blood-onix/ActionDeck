@@ -331,7 +331,7 @@ describe("run inspector", () => {
     expect(onActionComplete).toHaveBeenCalledOnce();
   });
 
-  it("does not offer rerun for successful runs", async () => {
+  it("offers rerun all jobs, not rerun failed jobs, for successful runs", async () => {
     const bridge = {
       request: vi.fn().mockResolvedValue({
         runId: 55,
@@ -349,6 +349,31 @@ describe("run inspector", () => {
     await screen.findByText(/successful run/);
     expect(screen.queryByRole("button", { name: /Re-run failed jobs/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Cancel run/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Re-run all jobs" }));
+    await waitFor(() => expect(bridge.request).toHaveBeenCalledWith(
+      "run.action",
+      { action: "rerun_all", runId: 55, attempt: 1 },
+    ));
+  });
+
+  it("offers re-run with same inputs for successful runs", async () => {
+    const onRunWithSameInputs = vi.fn();
+    const bridge = {
+      request: vi.fn().mockResolvedValue({
+        runId: 55,
+        attempt: 1,
+        attemptCount: 1,
+        dependencyResolution: "resolved",
+        title: "successful run",
+        status: "completed",
+        conclusion: "success",
+        htmlUrl: "https://github.com/acme/demo/actions/runs/55",
+        jobs: [],
+      }),
+    };
+    render(<RunInspector bridge={bridge} runId={55} onClose={() => undefined} onRunWithSameInputs={onRunWithSameInputs} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Re-run with same inputs" }));
+    expect(onRunWithSameInputs).toHaveBeenCalledOnce();
   });
 
   it("sends cancellation only for the displayed active run attempt", async () => {

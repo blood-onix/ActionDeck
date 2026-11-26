@@ -387,7 +387,7 @@
       {
         "name": "actiondeck_run_action",
         "displayName": "ActionDeck: Cancel or Rerun Workflow Run (Confirmed)",
-        "modelDescription": "Cancel an active run or rerun failed jobs after explicit user confirmation.",
+        "modelDescription": "Cancel an active run, rerun its failed jobs, or rerun all jobs of a completed run, after explicit user confirmation.",
         "inputSchema": {
           "type": "object",
           "required": [
@@ -404,7 +404,8 @@
               "type": "string",
               "enum": [
                 "cancel",
-                "rerun_failed_jobs"
+                "rerun_failed_jobs",
+                "rerun_all"
               ]
             },
             "runId": {

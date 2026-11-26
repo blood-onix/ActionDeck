@@ -3,7 +3,7 @@ import type { UiExecutionAuthorization } from "../dispatch/authorization";
 import { AppError } from "../../domain/models/errors";
 import { classifyGitHubError } from "../../github/client/classify-error";
 
-type RunAction = "cancel" | "rerun_failed_jobs";
+type RunAction = "cancel" | "rerun_failed_jobs" | "rerun_all";
 interface RunActionClient {
   rest: {
     actions: {
@@ -15,6 +15,7 @@ interface RunActionClient {
       }): Promise<{ data: { id: number; run_attempt?: number; status: string | null; conclusion: string | null } }>;
       cancelWorkflowRun(parameters: { owner: string; repo: string; run_id: number }): Promise<unknown>;
       reRunWorkflowFailedJobs(parameters: { owner: string; repo: string; run_id: number }): Promise<unknown>;
+      reRunWorkflow(parameters: { owner: string; repo: string; run_id: number }): Promise<unknown>;
     };
   };
 }
@@ -55,10 +56,19 @@ export async function executeRunAction(
   if (request.action === "rerun_failed_jobs" && observed.data.status !== "completed") {
     throw new AppError("invalid_input", "Failed jobs can be rerun only after the run completes.");
   }
+  if (request.action === "rerun_all" && observed.data.status !== "completed") {
+    throw new AppError("invalid_input", "All jobs can be rerun only after the run completes.");
+  }
 
   try {
     if (request.action === "cancel") {
       await client.rest.actions.cancelWorkflowRun({
+        owner: repository.owner,
+        repo: repository.repo,
+        run_id: request.runId,
+      });
+    } else if (request.action === "rerun_all") {
+      await client.rest.actions.reRunWorkflow({
         owner: repository.owner,
         repo: repository.repo,
         run_id: request.runId,
@@ -82,7 +92,7 @@ export async function executeRunAction(
         run_id: request.runId,
       });
       if (
-        request.action === "rerun_failed_jobs" &&
+        request.action !== "cancel" &&
         current.data.id === request.runId &&
         (current.data.run_attempt ?? 1) > request.attempt
       ) {

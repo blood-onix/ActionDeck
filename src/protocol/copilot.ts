@@ -72,7 +72,7 @@ export const copilotExecutionToolSchemas = {
   }).strict(),
   "actiondeck_run_action": z.object({
     repositoryId,
-    action: z.enum(["cancel", "rerun_failed_jobs"]),
+    action: z.enum(["cancel", "rerun_failed_jobs", "rerun_all"]),
     runId,
     attempt,
   }).strict(),
