@@ -157,7 +157,8 @@ suite("Release plan lifecycle integration", () => {
       s1: { deploy_token: "fresh-secret" },
     });
     assert.strictEqual(resumed.state, "running");
-    assert.deepStrictEqual(resumed.steps[0]?.reEntryRequiredKeys, []);
+    assert.deepStrictEqual(resumed.steps[0]?.inputs.deploy_token, "");
+    assert.deepStrictEqual(resumed.steps[0]?.reEntryRequiredKeys, ["deploy_token"]);
     scheduler.dispose();
   });
 });
